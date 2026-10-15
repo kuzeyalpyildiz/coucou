@@ -16,7 +16,7 @@ use crate::platform::{self, cursor_physical, left_button_down};
 
 /// Logical size of the full window — the largest island view, like the macOS panel.
 pub const PANEL_W: f64 = 720.0;
-pub const PANEL_H: f64 = 320.0;
+pub const PANEL_H: f64 = 360.0;
 /// Logical size of the invisible strip that wakes the island when it is hidden.
 pub const STRIP_W: f64 = 240.0;
 pub const STRIP_H: f64 = 6.0;
@@ -356,14 +356,22 @@ pub fn apply_geometry(app: &AppHandle, pref: &str, collapsed: bool) {
     let Some(m) = target_monitor(app, pref) else { return };
 
     let scale = m.scale_factor();
-    let mp = *m.position();
     let ms = *m.size();
 
-    let (lw, lh) = if collapsed { (STRIP_W, STRIP_H) } else { (PANEL_W, PANEL_H) };
+    let wa = m.work_area();
+    let available_w = wa.size.width as f64 / scale;
+    let available_h = wa.size.height as f64 / scale;
+    // Work-area coordinates exclude taskbars. Divide by this monitor's scale
+    // exactly once, then convert the chosen logical size back to physical pixels.
+    let (lw, lh) = if collapsed {
+        (STRIP_W.min(available_w), STRIP_H.min(available_h))
+    } else {
+        (PANEL_W.min(available_w), PANEL_H.min((available_h - 24.0).max(STRIP_H)))
+    };
     let pw = (lw * scale).round().max(1.0) as u32;
     let ph = (lh * scale).round().max(1.0) as u32;
-    let x = mp.x + (ms.width as i32 - pw as i32) / 2;
-    let y = mp.y;
+    let x = wa.position.x + (wa.size.width as i32 - pw as i32) / 2;
+    let y = wa.position.y;
 
     // GTK never sizes a non-resizable window below its natural size (200 px
     // here), so on Linux the 6 px wake strip would stay a 200 px block. tao

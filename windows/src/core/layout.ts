@@ -50,10 +50,10 @@ export interface ViewLayout {
   agentMode: AgentLayoutMode;
 }
 
-// The window is a fixed 720×320 (largest view) like the macOS panel; the island is
-// drawn inside it, glued to the top edge and horizontally centred.
+// Maximum native panel size in logical pixels. Smaller work areas shrink it;
+// the island is drawn inside it, glued to the top edge and centred.
 export const PANEL_W = 720;
-export const PANEL_H = 320;
+export const PANEL_H = 360;
 
 // No notch on a PC: these are the hidden/compact sizes from docs/SPEC.md.
 export const NOTCH_W = 184;
@@ -103,7 +103,23 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
 export const QUESTION_PICKER_H = 200;
 
 /** Chat view grows with the conversation — IslandContainer.chatPromptHeight. */
-export const CHAT_MODEL_PICKER_H = 440;
+export const CHAT_MODEL_PICKER_H = 320;
+/** Leave room for the animation inside the native viewport, including small monitors. */
+export function fitExpandedHeight(desired: number, viewportHeight: number): number {
+  // While waking, the viewport can still be the six-pixel strip. Resize will
+  // re-evaluate the target once the native panel has actually opened.
+  if (viewportHeight <= 64) return Math.min(desired, PANEL_H - 16);
+  return Math.min(desired, Math.max(0, viewportHeight - 16));
+}
+/** Constrain content to the actual DPI-adjusted native viewport, not screen pixels. */
+export function fitExpandedSize(w: number, h: number, viewportW: number, viewportH: number): { w: number; h: number } {
+  const waking = !Number.isFinite(viewportH) || viewportH <= 64;
+  const availableW = waking || !Number.isFinite(viewportW) || viewportW <= 0 ? PANEL_W : viewportW;
+  return {
+    w: Math.min(w, Math.max(0, availableW - 16)),
+    h: fitExpandedHeight(h, waking ? PANEL_H : viewportH),
+  };
+}
 export function chatPromptHeight(messageCount: number, modelPickerOpen = false): number {
   return modelPickerOpen ? CHAT_MODEL_PICKER_H : Math.min(300, 240 + messageCount * 40);
 }
