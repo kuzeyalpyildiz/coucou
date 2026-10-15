@@ -630,14 +630,17 @@ function buildQuestion(actions: ViewActions): ViewHost {
         row.append(button);
       }
       if (q.custom && !q.multiSelect) {
-        const input = h("input", { type: "text", "aria-label": q.question }) as HTMLInputElement;
+        const input = h("input", { type: "text", class: "chat-input", "aria-label": q.question }) as HTMLInputElement;
         const submit = () => {
           if (input.value.trim()) next(q.question, input.value, questions.length, displayedRequest, displayedIndex);
         };
+        const done = btn(tl("Done"), "primary", submit) as HTMLButtonElement;
+        done.disabled = true;
+        input.addEventListener("input", () => { done.disabled = !input.value.trim(); });
         input.addEventListener("keydown", (event) => {
           if (event.key === "Enter" && !event.isComposing) submit();
         });
-        row.append(input, btn(tl("Done"), "primary", submit));
+        row.append(h("div", { class: "chat-bar question-answer" }, input, done));
       }
       if (q.multiSelect) {
         const done = btn(tl("Done"), "primary", () => {

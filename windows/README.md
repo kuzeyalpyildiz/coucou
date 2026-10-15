@@ -403,6 +403,12 @@ never wait for a reply. OpenCode V2 waits only for an explicit permission decisi
 on timeout or relay failure its native approval prompt takes over. Configured
 allow/deny rules are unchanged, and no approval is remembered by this plugin.
 Simple OpenCode forms support Yes/No, single/multiple choices and typed text.
+Question handling needs `@opencode/client@2.0.29` in the OpenCode configuration
+directory (the plugin context itself does not expose form operations). On Windows,
+run `npm --prefix "$env:USERPROFILE/.config/opencode" install --ignore-scripts --save-exact @opencode/client@2.0.29`
+in PowerShell, then restart the OpenCode service. The plugin discovers the existing
+local service only; it never starts a server. Questions on a different/remote
+service remain in OpenCode. No service credentials are written into the plugin.
 Conditional, hidden, numeric and external fields remain in OpenCode. Answers
 are submitted only to the original, still-pending form. Build this fork's app
 and relay together, then reinstall the plugin from Settings and restart OpenCode;

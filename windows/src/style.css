@@ -812,6 +812,23 @@ body {
   overflow: hidden;
 }
 
+/* Keep typed answers on their own row, using the existing chat material. */
+.question-answer {
+  flex: 1 0 100%;
+  width: 100%;
+  min-width: 0;
+}
+
+.question-answer:focus-within {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.question-answer .btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .btn.off {
   opacity: 0.4;
 }

@@ -12,7 +12,9 @@ async function fixture(reply, options = {}) {
   const calls = [];
   const disposed = [];
   const formReplies = [];
-  const context = vm.createContext({ setTimeout, clearTimeout, AbortController, AbortSignal });
+  const warnings = [];
+  const context = vm.createContext({ setTimeout, clearTimeout, AbortController, AbortSignal,
+    process: { platform: 'win32' }, console: { warn: (message) => warnings.push(message) } });
   const transport = new vm.SyntheticModule(['spawn'], function () {
     this.setExport('spawn', () => {
       const child = new EventEmitter();
@@ -30,7 +32,20 @@ async function fixture(reply, options = {}) {
       return child;
     });
   }, { context });
-  const module = new vm.SourceTextModule(source, { context });
+  const api = new vm.SyntheticModule(['OpenCode', 'Service'], function () {
+    this.setExport('OpenCode', { make: () => ({ session: { form: {
+      get: async () => ({ ...options.form, state: { status: options.formState || 'pending' } }),
+      reply: async (input) => formReplies.push(input),
+    } }, form: { list: async () => ({ data: options.pendingForms || [] }) } }) });
+    this.setExport('Service', { discover: async () => options.noService ? undefined : { url: 'http://local.test' }, headers: () => ({}) });
+  }, { context });
+  await api.link(() => { throw new Error('Unexpected dependency'); });
+  await api.evaluate();
+  const module = new vm.SourceTextModule(source, { context, importModuleDynamically: async (specifier) => {
+    assert.ok(['@opencode/client', '@opencode/client/service'].includes(specifier));
+    if (options.missingClient) throw new Error('Package unavailable');
+    return api;
+  } });
   await module.link(() => transport);
   await module.evaluate();
   const hook = (domain) => async (name, fn) => {
@@ -39,10 +54,8 @@ async function fixture(reply, options = {}) {
   };
   const cleanup = await module.namespace.default.setup({
     location: { directory: '/plugin' },
-    session: { hook: hook('session'), get: async () => ({ location: { directory: '/session' } }), form: {
-      get: async () => ({ ...options.form, state: { status: options.formState || 'pending' } }),
-      reply: async (input) => formReplies.push(input),
-    } },
+    // Deliberately matches the real plugin SessionDomain: no form API here.
+    session: { hook: hook('session'), get: async () => ({ location: { directory: '/session' } }) },
     tool: { hook: hook('tool') },
     permission: { hook: hook('permission') },
     event: { subscribe: ({ signal }) => ({ async *[Symbol.asyncIterator]() {
@@ -50,7 +63,8 @@ async function fixture(reply, options = {}) {
       if (!signal.aborted) await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
     } }) },
   });
-  return { hooks, calls, cleanup, disposed, formReplies, questionForm: module.namespace.questionForm };
+  return { hooks, calls, cleanup, disposed, formReplies, warnings,
+    questionForm: module.namespace.questionForm, sameDirectory: module.namespace.sameDirectory };
 }
 
 for (const behavior of ['allow', 'deny']) {
@@ -133,11 +147,40 @@ test('unsupported, conditional and ambiguous forms stay in OpenCode', async () =
   } finally { await f.cleanup(); }
 });
 
+test('the visible question uses its full description, without a generated number or field key', async () => {
+  const f = await fixture(null);
+  try {
+    const text = 'If you could have a tiny dragon, what would you name it?';
+    const converted = f.questionForm({ fields: [{
+      key: 'internal-question-0', title: 'Random question', description: text, type: 'string',
+    }] });
+    assert.equal(converted.input.questions[0].question, text);
+    assert.deepEqual(JSON.parse(JSON.stringify(converted.answer({ [text]: 'Toast' }))), {
+      'internal-question-0': 'Toast',
+    });
+  } finally { await f.cleanup(); }
+});
+
+test('questions without descriptions fall back to the heading or key without adding a suffix', async () => {
+  const f = await fixture(null);
+  try {
+    const converted = f.questionForm({ fields: [
+      { key: 'one', title: 'Your answer', description: '   ', type: 'string' },
+      { key: 'two', type: 'string' },
+    ] });
+    assert.deepEqual(Array.from(converted.input.questions, (q) => q.question), ['Your answer', 'two']);
+    assert.equal(f.questionForm({ fields: [
+      { key: 'one', description: 'Same question?', type: 'string' },
+      { key: 'two', description: 'Same question?', type: 'string' },
+    ] }), null);
+  } finally { await f.cleanup(); }
+});
+
 for (const state of ['pending', 'answered', 'cancelled']) {
   test(`a question response is submitted only to its original pending form: ${state}`, async () => {
     const form = { id: 'frm_one', sessionID: 'ses_one', fields: [{ key: 'notes', type: 'string', title: 'Notes' }] };
     const response = JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: {
-      behavior: 'allow', updatedInput: { answers: { 'Notes (1)': 'my answer' } },
+      behavior: 'allow', updatedInput: { answers: { 'Notes': 'my answer' } },
     } } });
     const f = await fixture(response, { form, formState: state, events: [
       { type: 'form.created', location: { directory: '/plugin' }, data: { form } },
@@ -162,3 +205,40 @@ test('events for another location do not show a question card', async () => {
     assert.equal(f.calls.length, 0);
   } finally { await f.cleanup(); }
 });
+
+test('a declined duplicate relay must not close another instance\'s active card', async () => {
+  const form = { id: 'frm_duplicate', sessionID: 'ses_one', fields: [{ key: 'notes', type: 'string' }] };
+  const f = await fixture(null, { form, events: [
+    { type: 'form.created', location: { directory: '/plugin' }, data: { form } },
+  ] });
+  try {
+    await new Promise(setImmediate);
+    assert.equal(f.calls.filter((c) => c.hook_event_name === 'PermissionRequest').length, 1);
+    assert.equal(f.calls.some((c) => c.hook_event_name === 'OpenCodeFormClosed'), false);
+    assert.equal(f.formReplies.length, 0);
+  } finally { await f.cleanup(); }
+});
+
+test('Windows folder comparisons ignore case and slash differences, not different folders', async () => {
+  const f = await fixture(null);
+  try {
+    assert.equal(f.sameDirectory('C:\\Users\\North\\Desktop\\Swap', 'c:/users/north/desktop/swap/'), true);
+    assert.equal(f.sameDirectory('/Project', '/project', false), false);
+    assert.equal(f.sameDirectory('C:\\one', 'C:\\two'), false);
+  } finally { await f.cleanup(); }
+});
+
+for (const missing of ['missingClient', 'noService']) {
+  test(`unavailable form client leaves native questions untouched: ${missing}`, async () => {
+    const form = { id: 'frm_one', sessionID: 'ses_one', fields: [{ key: 'notes', type: 'string' }] };
+    const f = await fixture(null, { [missing]: true, form, events: [
+      { type: 'form.created', location: { directory: '/plugin' }, data: { form } },
+    ] });
+    try {
+      await new Promise(setImmediate);
+      assert.equal(f.calls.length, 0);
+      assert.equal(f.formReplies.length, 0);
+      if (missing === 'missingClient') assert.equal(f.warnings.length, 1);
+    } finally { await f.cleanup(); }
+  });
+}

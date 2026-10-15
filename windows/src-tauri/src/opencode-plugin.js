@@ -10,13 +10,21 @@ const EVENTS = {
   'session.deleted': 'SessionEnd',
 };
 
+export function sameDirectory(left, right, windows = process.platform === 'win32') {
+  const normalize = (value) => {
+    const path = String(value || '').replace(/\\/g, '/').replace(/\/+$/, '');
+    return windows ? path.toLowerCase() : path;
+  };
+  return normalize(left) === normalize(right);
+}
+
 // Unsupported/conditional forms stay in OpenCode rather than losing semantics.
 export function questionForm(form) {
   if (!Array.isArray(form.fields) || !form.fields.length) return null;
   const questions = [];
   const mappings = [];
   const keys = new Set();
-  for (const [index, field] of form.fields.entries()) {
+  for (const field of form.fields) {
     if (typeof field.key !== 'string' || keys.has(field.key) || field.hidden || field.when?.length) return null;
     keys.add(field.key);
     if (!['string', 'boolean', 'multiselect'].includes(field.type)) return null;
@@ -25,7 +33,13 @@ export function questionForm(form) {
       : (field.options || []);
     if (options.some((o) => typeof o.label !== 'string' || !o.label)) return null;
     if (new Set(options.map((o) => o.label)).size !== options.length) return null;
-    const question = `${field.title || field.key} (${index + 1})`;
+    // OpenCode question forms put the short header in title and the actual
+    // question in description. Field keys stay internal in the answer mapping.
+    const question = [field.description, field.title, field.key]
+      .find((value) => typeof value === 'string' && value.trim());
+    // The relay answers by question text. Ambiguous duplicate text stays in
+    // OpenCode rather than adding implementation IDs to the visible question.
+    if (!question || questions.some((item) => item.question === question)) return null;
     const custom = field.type === 'string' && (!options.length || field.custom === true);
     if (!options.length && !custom) return null;
     questions.push({ question, multiSelect: field.type === 'multiselect', custom,
@@ -90,6 +104,23 @@ export default {
     let closed = false;
     const forms = new Map();
     const directories = new Map();
+    let clientPromise;
+    function formClient() {
+      // Form operations belong to the full client, not the plugin's SessionDomain.
+      // Discover only the existing local service; never start another server.
+      clientPromise ??= (async () => {
+        const [{ OpenCode }, { Service }] = await Promise.all([
+          import('@opencode/client'), import('@opencode/client/service'),
+        ]);
+        const endpoint = await Service.discover();
+        if (!endpoint) return null;
+        return OpenCode.make({ baseUrl: endpoint.url, headers: Service.headers(endpoint) });
+      })().catch(() => {
+        console.warn('[coucou] Question connection unavailable; native OpenCode questions remain active. Install @opencode/client@2.0.29 beside the plugin.');
+        return null;
+      });
+      return clientPromise;
+    }
 
     function relay(event, fields, decision = false, signal) {
       if (closed || children.size >= 16) return Promise.resolve(null);
@@ -179,7 +210,8 @@ export default {
     }
 
     async function showForm(form) {
-      if (closed || !ctx.session.form || forms.has(form.id) || forms.size >= 8) return;
+      const client = await formClient();
+      if (closed || !client || forms.has(form.id) || forms.size >= 8) return;
       const converted = questionForm(form);
       if (!converted || JSON.stringify(converted.input).length > 1800) return;
       const pending = new AbortController();
@@ -192,16 +224,15 @@ export default {
         const answer = converted.answer(response?.updatedInput?.answers);
         if (!answer || closed) return;
         const input = { sessionID: form.sessionID, formID: form.id };
-        const current = await ctx.session.form.get(input);
+        const current = await client.session.form.get(input, { signal: AbortSignal.timeout(3000) });
         if (current.state.status !== 'pending' || JSON.stringify(current.fields) !== JSON.stringify(form.fields)) return;
-        await ctx.session.form.reply({ ...input, answer });
+        await client.session.form.reply({ ...input, answer }, { signal: AbortSignal.timeout(3000) });
       } catch {
         // Native form remains available on a failed or stale response.
       } finally {
         forms.delete(form.id);
-        void relay('OpenCodeFormClosed', {
-          session_id: form.sessionID, cwd: ctx.location.directory, coucou_source_id: form.id,
-        });
+        // A declined duplicate relay is not a cancelled OpenCode form. Only
+        // form.replied/form.cancelled may close another instance's active card.
       }
     }
 
@@ -210,12 +241,13 @@ export default {
       while (!closed) {
         try {
           for await (const e of ctx.event.subscribe({ signal: controller.signal })) {
-            if (e.location?.directory && e.location.directory !== ctx.location.directory) continue;
+            if (e.location?.directory && !sameDirectory(e.location.directory, ctx.location.directory)) continue;
             if (e.type === 'session.moved' || e.type === 'session.deleted') directories.delete(e.data?.sessionID);
-            if (e.type === 'server.connected' && ctx.form?.list) {
-              void ctx.form.list({ location: { directory: ctx.location.directory } }, { signal: controller.signal })
+            if (e.type === 'server.connected') {
+              clientPromise = undefined;
+              void formClient().then((client) => client?.form.list({ location: { directory: ctx.location.directory } }, { signal: controller.signal }))
                 .then((pending) => {
-                  if (!closed) for (const form of pending.data.slice(0, 8)) void showForm(form);
+                  if (!closed && pending) for (const form of pending.data.slice(0, 8)) void showForm(form);
                 }).catch(() => {});
             }
             if (e.type === 'form.created') void showForm(e.data.form);
