@@ -806,10 +806,45 @@ body {
 }
 
 .question-text {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+  min-width: 0;
+}
+
+/* Start at the top: centred overflowing flex content loses its first lines.
+   Scroll the complete question, so neither long text nor many choices can
+   make the remaining answers unreachable on short/high-DPI displays. */
+.question-content {
+  justify-content: flex-start;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  padding-top: 16px;
+  padding-bottom: 16px;
+  gap: 10px;
+}
+
+.question-content > * {
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.question-content .options .btn {
+  max-width: 100%;
+  height: auto;
+  min-height: 30px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 520px) {
+  .question-content {
+    padding-inline-start: 16px !important;
+    padding-top: 64px;
+  }
 }
 
 /* Keep typed answers on their own row, using the existing chat material. */

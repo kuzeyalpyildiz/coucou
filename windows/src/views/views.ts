@@ -553,7 +553,9 @@ function buildQuestion(actions: ViewActions): ViewHost {
   const title = h("div", { class: "title question-text" });
   const row = h("div", { class: "actions options" });
   const fold = foldButton(actions);
-  const el = h("div", { class: "view" }, card("cyan", stack(116, 16, who, title, row), fold));
+  const content = stack(116, 16, who, title, row);
+  content.classList.add("question-content");
+  const el = h("div", { class: "view question-view" }, card("cyan", content, fold));
 
   // Where we are in the request on screen: which question, what is answered so
   // far, and what is ticked in a pick-several question.
