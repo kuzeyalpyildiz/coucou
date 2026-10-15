@@ -76,7 +76,16 @@ interface Picker {
 function buildPicker(onChange: () => void): Picker {
   const chips = h("div", { class: "picker-chips" });
   const list = h("div", { class: "picker-list" });
-  const el = h("div", { class: "picker" }, chips, h("div", { class: "picker-rule" }), list);
+  const search = h("input", {
+    type: "search", class: "picker-search",
+    placeholder: t("Search models…"), "aria-label": t("Search models"),
+    spellcheck: "false",
+  }) as HTMLInputElement;
+  const el = h("div", { class: "picker" }, chips, h("div", { class: "picker-rule" }), search, list);
+  let loaded: { provider: ProviderDef; models: ModelInfo[] } | null = null;
+  search.addEventListener("input", () => {
+    if (loaded) drawModels(loaded.provider, loaded.models);
+  });
 
   /** Models already asked for, by provider; a model server is asked again each time. */
   const cache = new Map<string, ModelInfo[]>();
@@ -122,9 +131,16 @@ function buildPicker(onChange: () => void): Picker {
   }
 
   function drawModels(p: ProviderDef, models: ModelInfo[]) {
+    loaded = { provider: p, models };
     clear(list);
     const current = activeModel(State.settings);
-    for (const m of models) {
+    const query = search.value.trim().toLowerCase();
+    const matches = models.filter(m => `${m.label}\n${m.id}`.toLowerCase().includes(query));
+    if (!matches.length) {
+      status(query ? t("No matching models.") : t("No models available."));
+      return;
+    }
+    for (const m of matches) {
       const on = m.id === current;
       const row = h(
         "button",
@@ -140,10 +156,12 @@ function buildPicker(onChange: () => void): Picker {
       });
       list.append(row);
     }
-    list.querySelector(".picker-model.on")?.scrollIntoView({ block: "nearest" });
+    if (!query) list.querySelector(".picker-model.on")?.scrollIntoView({ block: "nearest" });
+    else list.scrollTop = 0;
   }
 
   async function loadModels() {
+    loaded = null;
     const p = providerDef(State.settings.chatProvider);
     const ticket = ++request;
     const cached = p.urlField ? undefined : cache.get(p.id);
@@ -175,6 +193,7 @@ function buildPicker(onChange: () => void): Picker {
   }
 
   function open() {
+    search.value = "";
     isOpen = true;
     el.classList.add("on");
     drawChips();

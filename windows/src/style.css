@@ -805,6 +805,24 @@ body {
   gap: 6px;
 }
 
+.picker-search {
+  font: 400 12px var(--font);
+  color: var(--ink);
+  min-width: 0;
+  flex: 0 0 auto;
+  width: 100%;
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--card);
+}
+
+.picker-search:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: -2px;
+}
+
 .question-text {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
