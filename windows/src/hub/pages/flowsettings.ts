@@ -13,7 +13,9 @@ import { button, card, divider, keyKeycap, keycap, label, number, row, segmented
 export function modelsControl(ctx: HubContext, onReady?: () => void): HTMLElement {
   const el = h("div", { style: "display:flex;align-items:center;gap:8px" });
   let confirming = false;
+  let lastState = ctx.status.models.parakeet.state;
   const draw = (models: ModelsStatus) => {
+    lastState = models.parakeet.state;
     clear(el);
     const m = models.parakeet;
     if (m.state === "missing") {
@@ -47,7 +49,7 @@ export function modelsControl(ctx: HubContext, onReady?: () => void): HTMLElemen
   draw(ctx.status.models);
   void onEvent<ModelsStatus>("speech-models", (models) => {
     if (!el.isConnected) return;
-    const wasReady = ctx.status.models.parakeet.state === "ready";
+    const wasReady = lastState === "ready";
     ctx.status.models = models;
     draw(models);
     if (!wasReady && models.parakeet.state === "ready") onReady?.();

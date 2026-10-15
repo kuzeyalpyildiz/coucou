@@ -10,6 +10,7 @@ import { onEvent } from "../core/bridge";
 import { FlowBridge, type FlowPrefs, type FlowStatus, type ModelsStatus } from "../core/flow";
 import { hero, liveMochi } from "./hero";
 import { icon, keyLabel } from "./ui";
+import { loadSaved } from "./load";
 
 export type PageId =
   | "dictation" | "notes" | "insights" | "dictionary" | "snippets" | "styles" | "flowsettings"
@@ -85,7 +86,26 @@ const DEFAULT_STATUS: FlowStatus = {
 export async function startHub(root: HTMLElement, opts: HubOptions) {
   document.body.classList.add("hub-window");
   let current: PageId = "dictation";
-  let status: FlowStatus = (await FlowBridge.status()) ?? DEFAULT_STATUS;
+  let status: FlowStatus = DEFAULT_STATUS;
+  // Defaults are for browser preview only, never an installed app's saved data.
+  if ("__TAURI_INTERNALS__" in window) {
+    for (;;) {
+      clear(root);
+      root.append(h("div", { class: "hub-note", role: "status", text: t("Loading…") }));
+      try {
+        status = await loadSaved(FlowBridge.status);
+        break;
+      } catch {
+        clear(root);
+        await new Promise<void>(resolve => {
+          root.append(
+            h("div", { class: "hub-warn", role: "alert", text: t("Could not load saved data. Retry without changing your settings.") }),
+            h("button", { class: "hub-link", text: t("Retry"), onclick: () => resolve() }),
+          );
+        });
+      }
+    }
+  }
   const items = new Map<PageId, HTMLElement>();
   const statusLine = h("div", { class: "hub-status" });
   const scroll = h("div", { class: "hub-scroll" });
@@ -97,7 +117,7 @@ export async function startHub(root: HTMLElement, opts: HubOptions) {
     },
     navigate: (page) => void show(page),
     refresh: async () => {
-      status = (await FlowBridge.status()) ?? status;
+      status = "__TAURI_INTERNALS__" in window ? await loadSaved(FlowBridge.status) : status;
       drawStatus();
       return status;
     },
@@ -140,13 +160,21 @@ export async function startHub(root: HTMLElement, opts: HubOptions) {
     const token = ++rendering;
     const page_ = h("div", { class: "hub-page" });
     const renderer = opts.flowPages[def.id];
-    if (renderer) {
-      await renderer(page_, ctx);
-    } else {
-      page_.append(hero(def.id, def.title(), def.subtitle?.() ?? null));
-      const container = h("div", { id: "settings-root" });
-      page_.append(container);
-      await opts.renderNotch(def.id, container);
+    try {
+      if (renderer) {
+        await renderer(page_, ctx);
+      } else {
+        page_.append(hero(def.id, def.title(), def.subtitle?.() ?? null));
+        const container = h("div", { id: "settings-root" });
+        page_.append(container);
+        await opts.renderNotch(def.id, container);
+      }
+    } catch {
+      clear(page_);
+      page_.append(
+        h("div", { class: "hub-warn", role: "alert", text: t("Could not load saved data. Retry without changing your settings.") }),
+        h("button", { class: "hub-link", text: t("Retry"), onclick: () => void show(def.id) }),
+      );
     }
     if (token !== rendering) return;
     clear(scroll);
@@ -188,6 +216,11 @@ export async function startHub(root: HTMLElement, opts: HubOptions) {
   void onEvent<ModelsStatus>("speech-models", (models) => {
     status = { ...status, models };
     drawStatus();
+  });
+  // The hub stays alive when hidden. Refresh read-only/live controls when it
+  // returns, not only after the user clicks a toggle. Leave editors untouched.
+  window.addEventListener("focus", () => {
+    if (["dictation", "voice", "flowsettings", "insights"].includes(current)) void show(current);
   });
   return {
     redraw: () => void show(current),

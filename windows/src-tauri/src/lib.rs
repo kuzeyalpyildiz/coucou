@@ -292,6 +292,16 @@ fn open_session(session_id: Option<String>, path: Option<String>) -> bool {
     }
 }
 
+/// A question handoff must focus its existing session, never launch an
+/// unrelated editor when ownership cannot be resolved (e.g. a headless service).
+#[tauri::command]
+async fn focus_session(session_id: String, path: Option<String>) -> bool {
+    let Some(owners) = session_window::lookup(&session_id) else { return false };
+    let folder = path.as_deref().map(session_window::folder_name).unwrap_or_default().to_string();
+    tauri::async_runtime::spawn_blocking(move || platform::focus_session_window(&owners, &folder))
+        .await.unwrap_or(false)
+}
+
 /// The Claude Desktop pill's target: the Claude app (Windows only — it has no
 /// Linux build).
 #[tauri::command]
@@ -742,6 +752,7 @@ pub fn run() {
             open_url,
             open_in_vscode,
             open_session,
+            focus_session,
             open_claude_desktop,
             open_file_in_vscode,
             quit_app,
@@ -867,6 +878,9 @@ pub fn run() {
             let handle = app.handle().clone();
             app.manage(phone_link::PhoneLink::new(handle.clone()));
             tray::build(&handle)?;
+            // The hidden settings webview starts executing immediately. Its
+            // first status/history/statistics reads must see the saved store.
+            flow::prepare(&handle);
             // Before the island: see create_settings_window.
             create_settings_window(&handle);
             // Same rule for Mochi's desktop window and the dictation pill.

@@ -95,6 +95,10 @@ struct TauriFeatures {
 }
 
 impl server::Features for TauriFeatures {
+    fn request_snapshot(&self) {
+        log::line("phone link: authenticated phone requested current agent snapshot");
+        let _ = self.app.emit_to(island::WINDOW_LABEL, "phone-link-sync", ());
+    }
     fn details(&self) -> bool {
         self.app.state::<Shared>().settings.lock().unwrap().phone_details
     }
@@ -193,6 +197,7 @@ impl PhoneLink {
                 *self.error.lock().unwrap() = None;
                 drop(running);
                 self.sync_relay();
+                let _ = self.app.emit("phone-link-status-changed", ());
                 Ok(())
             }
             Err(e) => {
@@ -235,6 +240,7 @@ impl PhoneLink {
             r.handle.stop();
             log::line("phone link: stopped");
         }
+        let _ = self.app.emit("phone-link-status-changed", ());
     }
 }
 
@@ -824,13 +830,13 @@ pub fn phone_link_publish_prefs(window: WebviewWindow, link: State<PhoneLink>, o
 
 /// The island's picture of its sessions and of the request waiting for an answer.
 #[tauri::command]
-pub fn phone_link_publish(window: WebviewWindow, link: State<PhoneLink>, sessions: Vec<SessionIn>, approval: Option<ApprovalIn>) -> Result<(), String> {
+pub fn phone_link_publish(window: WebviewWindow, link: State<PhoneLink>, sessions: Vec<SessionIn>, approval: Option<ApprovalIn>) -> Result<bool, String> {
     only_island(&window)?;
     if link.running.lock().unwrap().is_none() {
-        return Ok(());
+        return Ok(false);
     }
     link.hub.publish(sessions, approval, server::now_ms());
-    Ok(())
+    Ok(true)
 }
 
 /// The app is quitting: withdraw the announcement so phones forget this computer at once.

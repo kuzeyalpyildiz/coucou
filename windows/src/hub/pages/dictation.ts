@@ -10,6 +10,7 @@ import type { HubContext } from "../shell";
 import { emptyState, glowCard } from "../hero";
 import { button, card, icon, iconButton, keyLabel, label, number, row, shortCount, toggle } from "../ui";
 import { modelsControl } from "./flowsettings";
+import { loadSaved } from "../load";
 
 function dayKey(ms: number): string {
   const d = new Date(ms);
@@ -29,7 +30,7 @@ function time(ms: number): string {
 }
 
 export async function dictationPage(page: HTMLElement, ctx: HubContext) {
-  const status = ctx.status;
+  const status = await ctx.refresh();
   const key = keyLabel(status.keys === "wayland" ? "wayland" : status.prefs.key, status.platform);
   const ready = status.prefs.enabled && status.models.parakeet.state === "ready";
 
@@ -44,7 +45,9 @@ export async function dictationPage(page: HTMLElement, ctx: HubContext) {
 
   if (!ready) page.append(setup(ctx));
 
-  const [history, stats] = await Promise.all([FlowBridge.history(), FlowBridge.stats()]);
+  const [history, stats] = await Promise.all([
+    loadSaved(FlowBridge.history), loadSaved(FlowBridge.stats),
+  ]);
   let entries: FlowEntry[] = history ?? [];
   let query = "";
 

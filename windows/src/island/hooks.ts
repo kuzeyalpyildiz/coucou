@@ -401,8 +401,13 @@ function handleHook(island: Island, payload: HookPayload) {
       }
       Sound.play("finish");
       // A card waiting for an answer is never covered by another alert.
-      if (focused && !State.pendingApproval) surface("finished", true);
-      else State.setPillBadge(agentId, "finished");
+      // A collapsed notch may still have a service/older agent selected. That
+      // must not suppress a new completion popup. Do not steal an expanded
+      // view, a pending question, or the front just restored by closing one.
+      if (!State.pendingApproval && (focused || (!pending && State.mode !== "expanded"))) {
+        if (!focused) State.setFocus(agentId);
+        surface("finished", true);
+      } else State.setPillBadge(agentId, "finished");
       cancelStopTimer(agentId);
       stopTimers.set(
         agentId,

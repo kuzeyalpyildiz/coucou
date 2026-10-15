@@ -1,5 +1,5 @@
-// Local app commands: recognized text is only a lookup key, never a path,
-// command line, URL or shell argument. No AI or network calls in this module.
+// Recognized text is a catalog lookup key, never an executable, URL or shell
+// argument. App discovery and activation are native Rust/Windows Shell calls.
 use super::wake::normalize;
 
 fn app_name(text: &str) -> Option<String> {
@@ -12,16 +12,71 @@ fn app_name(text: &str) -> Option<String> {
     None
 }
 
-/// Prefer an exact app name; never silently pick between several matches.
+#[derive(Debug, Clone)]
 #[cfg(any(windows, test))]
-fn matches(wanted: &str, labels: &[String]) -> Vec<usize> {
-    let exact: Vec<_> = labels.iter().enumerate()
-        .filter(|(_, label)| normalize(label) == wanted).map(|(i, _)| i).collect();
-    if !exact.is_empty() { return exact; }
-    labels.iter().enumerate().filter(|(_, label)| {
-        let label = normalize(label);
-        label.starts_with(&format!("{wanted} ")) || label.ends_with(&format!(" {wanted}"))
-    }).map(|(i, _)| i).collect()
+pub(super) struct AppName {
+    pub label: String,
+    /// Windows' canonical parsing identity, not merely the shortcut's label.
+    pub identity: String,
+}
+
+/// Reserved system-app names use only these compiled-in OS targets. Never
+/// search PATH or append recognized words to a process command line.
+#[cfg(any(windows, test))]
+pub(super) fn system_target(wanted: &str) -> Option<&'static str> {
+    match wanted {
+        "notepad" | "note pad" => Some("System32\\notepad.exe"),
+        "calculator" | "calc" => Some("System32\\calc.exe"),
+        "paint" | "microsoft paint" | "ms paint" => Some("System32\\mspaint.exe"),
+        "task manager" => Some("System32\\Taskmgr.exe"),
+        "command prompt" => Some("System32\\cmd.exe"),
+        "file explorer" | "windows explorer" => Some("explorer.exe"),
+        "settings" | "windows settings" => Some("ms-settings:"),
+        _ => None,
+    }
+}
+
+#[cfg(any(windows, test))]
+fn score(wanted: &str, label: &str) -> Option<u8> {
+    let label = normalize(label);
+    if label == wanted { return Some(0); }
+    // Small, explicit aliases; no spelling guesses or AI model requests.
+    let alias = match wanted {
+        "vs code" | "vscode" => "visual studio code",
+        "google chrome" => "chrome",
+        _ => wanted,
+    };
+    if label == alias { return Some(1); }
+    // Never confuse a requested app with its updater/uninstaller/help entry.
+    if label.split_whitespace().any(|word| matches!(word,
+        "uninstall" | "uninstaller" | "updater" | "installer" | "setup" | "repair" | "help")) {
+        return None;
+    }
+    if label.starts_with(&format!("{alias} ")) || label.ends_with(&format!(" {alias}")) {
+        return Some(2);
+    }
+    None
+}
+
+/// Return the best distinct identities. Duplicate shortcuts for one app must
+/// not create ambiguity; different products/editions must not be guessed away.
+#[cfg(any(windows, test))]
+pub(super) fn matches(wanted: &str, apps: &[AppName]) -> Vec<usize> {
+    let mut best = u8::MAX;
+    let mut found = Vec::new();
+    let mut identities = std::collections::HashSet::new();
+    for (index, app) in apps.iter().enumerate() {
+        if app.identity.is_empty() { continue; }
+        let Some(rank) = score(wanted, &app.label) else { continue };
+        if rank > best { continue; }
+        if rank < best {
+            best = rank;
+            found.clear();
+            identities.clear();
+        }
+        if identities.insert(app.identity.to_lowercase()) { found.push(index); }
+    }
+    found
 }
 
 pub fn respond(text: &str, may_launch: impl Fn() -> bool) -> Option<String> {
@@ -31,55 +86,7 @@ pub fn respond(text: &str, may_launch: impl Fn() -> bool) -> Option<String> {
 
 #[cfg(windows)]
 fn launch(wanted: &str, may_launch: impl Fn() -> bool) -> String {
-    use std::path::PathBuf;
-    let mut stack = Vec::new();
-    for variable in ["APPDATA", "ProgramData"] {
-        if let Some(root) = std::env::var_os(variable) {
-            let root = PathBuf::from(root);
-            if root.is_absolute() {
-                stack.push(root.join("Microsoft\\Windows\\Start Menu\\Programs"));
-            }
-        }
-    }
-    let mut apps = Vec::new();
-    let mut visited = 0;
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(dir) else { continue };
-        for entry in entries.flatten() {
-            visited += 1;
-            if visited > 8192 {
-                return "The app list is too large to search safely. Open the app manually.".into();
-            }
-            let Ok(kind) = entry.file_type() else { continue };
-            // Do not follow directory links/junctions out of the Start menu.
-            use std::os::windows::fs::MetadataExt;
-            if entry.metadata().map(|m| m.file_attributes() & 0x400 != 0).unwrap_or(true) { continue; }
-            let path = entry.path();
-            if kind.is_dir() { stack.push(path); }
-            else if kind.is_file() && path.extension().is_some_and(|x| x.eq_ignore_ascii_case("lnk")) {
-                if let Some(label) = path.file_stem().map(|x| x.to_string_lossy().into_owned()) {
-                    apps.push((label, path));
-                }
-            }
-        }
-    }
-    apps.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-    let labels: Vec<_> = apps.iter().map(|(label, _)| label.clone()).collect();
-    let found = matches(wanted, &labels);
-    match found.as_slice() {
-        [] => "No matching Start menu app found. Try its full installed name.".into(),
-        [index] => {
-            if !may_launch() { return "App command cancelled.".into(); }
-            let (label, path) = &apps[*index];
-            // Only the absolute shortcut collected above reaches Explorer.
-            match std::process::Command::new("explorer.exe").arg(path).spawn() {
-                Ok(_) => format!("Launch requested: {label}."),
-                Err(_) => format!("Could not launch {label}. Open it manually."),
-            }
-        }
-        _ => format!("Several apps match: {}. Say OK Coucou, open, then the full name. No app was opened.",
-            found.iter().take(4).map(|i| labels[*i].as_str()).collect::<Vec<_>>().join(", ")),
-    }
+    super::apps_windows::launch(wanted, may_launch)
 }
 
 #[cfg(not(windows))]
@@ -90,6 +97,9 @@ fn launch(_: &str, _: impl Fn() -> bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn app(label: &str, identity: &str) -> AppName {
+        AppName { label: label.into(), identity: identity.into() }
+    }
     #[test]
     fn explicit_commands_only() {
         assert_eq!(app_name("Open Spotify."), Some("spotify".into()));
@@ -100,16 +110,43 @@ mod tests {
         }
     }
     #[test]
-    fn exact_name_wins_and_ambiguous_names_are_not_guessed() {
-        let labels = vec!["Visual Studio".into(), "Visual Studio Code".into(), "Spotify".into()];
-        assert_eq!(matches("visual studio", &labels), vec![0]);
-        assert_eq!(matches("visual", &labels), vec![0, 1]);
-        assert_eq!(matches("spotify", &labels), vec![2]);
-        assert!(matches("spot", &labels).is_empty());
-        assert!(matches("spotify and delete files", &labels).is_empty());
+    fn exact_app_wins_over_other_editions() {
+        let apps = [app("Discord Canary", "canary"), app("Discord", "stable"), app("Discord PTB", "ptb")];
+        assert_eq!(matches("discord", &apps), vec![1]);
+        assert_eq!(matches("discord canary", &apps), vec![0]);
     }
     #[test]
-    fn duplicate_shortcut_names_remain_ambiguous() {
-        assert_eq!(matches("spotify", &["Spotify".into(), "Spotify".into()]), vec![0, 1]);
+    fn duplicate_entries_with_the_same_app_identity_are_one_app() {
+        let apps = [app("Discord", "Discord.App"), app("Discord", "discord.app")];
+        assert_eq!(matches("discord", &apps), vec![0]);
+    }
+    #[test]
+    fn genuinely_different_apps_remain_ambiguous() {
+        let apps = [app("Discord", "first"), app("Discord", "second")];
+        assert_eq!(matches("discord", &apps), vec![0, 1]);
+    }
+    #[test]
+    fn partial_names_do_not_select_maintenance_tools() {
+        let apps = [app("Google Chrome", "chrome"), app("Chrome Uninstaller", "remove"), app("Chrome Updater", "update")];
+        assert_eq!(matches("chrome", &apps), vec![0]);
+        assert!(matches("chr", &apps).is_empty());
+        assert!(matches("chrome and delete files", &apps).is_empty());
+    }
+    #[test]
+    fn exact_match_beats_aliases_and_aliases_are_explicit() {
+        let apps = [app("Visual Studio Code", "code"), app("Visual Studio", "vs")];
+        assert_eq!(matches("vs code", &apps), vec![0]);
+        assert_eq!(matches("visual studio", &apps), vec![1]);
+        assert_eq!(matches("visual", &apps), vec![0, 1]);
+        assert!(matches("some unknown app", &apps).is_empty());
+    }
+    #[test]
+    fn system_apps_have_fixed_targets_not_spoken_paths_or_arguments() {
+        assert_eq!(system_target("notepad"), Some("System32\\notepad.exe"));
+        assert_eq!(system_target("calculator"), Some("System32\\calc.exe"));
+        assert_eq!(system_target("settings"), Some("ms-settings:"));
+        for name in ["notepad.exe", "notepad file.txt", "cmd /c anything", "https://example.com", "c windows notepad exe"] {
+            assert_eq!(system_target(name), None);
+        }
     }
 }

@@ -82,7 +82,7 @@ function agentBlock(initial: AgentHookStatus): HTMLElement {
     }
     head.append(
       h("div", { style: "display:flex;align-items:center;gap:8px;min-width:132px" },
-        statusDot(status.installed),
+        statusDot(status.installed && !status.updateAvailable),
         h("span", { style: "font-size:12.5px", text: status.name }),
       ),
       h("span", { class: "hint", text: status.approvals ? TEXT.approvals : TEXT.displayOnly }),
@@ -97,6 +97,7 @@ function agentBlock(initial: AgentHookStatus): HTMLElement {
       }));
     }
     body.append(h("span", { class: "path", text: status.path }));
+    if (status.updateAvailable) body.append(h("div", { class: "notice err", text: t("Your OpenCode plugin is outdated. Reinstall it here, then restart the OpenCode service to load completion updates.") }));
   }
 
   async function showPreview(install: boolean) {

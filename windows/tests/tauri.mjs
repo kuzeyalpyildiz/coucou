@@ -6,14 +6,23 @@
 export const calls = [];
 
 const listeners = new Map();
+let nextListenerId = 1;
+
+export const eventInternals = {
+  unregisterListener: (event, id) => {
+    if (listeners.get(event)?.id === id) listeners.delete(event);
+  },
+};
 
 export const internals = {
   transformCallback: (callback) => callback,
   invoke: async (cmd, args) => {
     if (cmd === "plugin:event|listen") {
-      listeners.set(args.event, args.handler);
-      return listeners.size;
+      const id = nextListenerId++;
+      listeners.set(args.event, { handler: args.handler, id });
+      return id;
     }
+    if (cmd === "plugin:event|unlisten") return;
     calls.push([cmd, args]);
     return null;
   },
@@ -21,9 +30,9 @@ export const internals = {
 
 /** Fires an event the way the Rust side would. */
 export function emit(event, payload) {
-  const handler = listeners.get(event);
-  if (!handler) throw new Error(`nothing listens to "${event}"`);
-  handler({ event, id: 0, payload });
+  const listener = listeners.get(event);
+  if (!listener) throw new Error(`nothing listens to "${event}"`);
+  listener.handler({ event, id: listener.id, payload });
 }
 
 /** The commands invoked under one name, as a list of their arguments. */

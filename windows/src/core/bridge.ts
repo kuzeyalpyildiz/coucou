@@ -223,6 +223,9 @@ export const Bridge = {
    */
   openSession: (sessionId: string | null, path: string | null) =>
     call<boolean>("open_session", { sessionId, path }),
+  /** Focus only; never opens a fallback app for a question handoff. */
+  focusSession: (sessionId: string, path: string | null) =>
+    call<boolean>("focus_session", { sessionId, path }),
 
   /** The Claude desktop app, for the Claude Desktop pill (Windows only). */
   openClaudeDesktop: () => call<boolean>("open_claude_desktop"),
@@ -321,7 +324,7 @@ export const Bridge = {
   phoneChatSetEnabled: (enabled: boolean) => callOrThrow<PhoneChatStatus>("phone_chat_set_enabled", { enabled }),
   phoneChatSetModels: (models: string[]) => callOrThrow<PhoneChatStatus>("phone_chat_set_models", { models }),
   phoneLinkPublish: (sessions: PhoneLinkSession[], approval: PhoneLinkApproval | null) =>
-    call<void>("phone_link_publish", { sessions, approval }),
+    call<boolean>("phone_link_publish", { sessions, approval }),
   phoneLinkPublishQuestion: (question: PhoneLinkQuestion | null) => call<void>("phone_link_publish_question", { question }),
   /** What Mochi wears ("auto" or an outfit), for phones that asked for it. */
   phoneLinkPublishPrefs: (outfit: string) => call<void>("phone_link_publish_prefs", { outfit }),
@@ -490,6 +493,7 @@ export interface HookStatus {
 
 /** One agent other than Claude Code, as agents.rs reports it. */
 export interface AgentHookStatus {
+  updateAvailable?: boolean;
   /** The `--agent` name; its pill is `agent_<id>`. */
   id: string;
   name: string;

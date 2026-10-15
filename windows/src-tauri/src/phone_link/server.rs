@@ -60,6 +60,9 @@ const AUTH_PENALTY: Duration = Duration::from_millis(400);
 
 /// Which optional features the user has switched on, read again for every connection.
 pub trait Features: Send + Sync {
+    /// Authenticated/reconnected phones need a fresh island snapshot even when
+    /// the desktop state has not changed since the link process started.
+    fn request_snapshot(&self) {}
     /// Session details: the steps, the last line, the project's folder name and the colour.
     fn details(&self) -> bool;
     /// Answering the questions Claude Code asks, from the phone (the screen-lock check is the phone's).
@@ -314,6 +317,7 @@ where
     }
     let _ = say(welcome).await;
     let (id, evicted) = shared.hub.subscribe_with(tx.clone(), (shared.clock)(), crate::phone_link::hub::Caps { details, answers, prefs, diffs, usage, relay, services });
+    shared.features.request_snapshot();
 
     // 2. the conversation
     loop {

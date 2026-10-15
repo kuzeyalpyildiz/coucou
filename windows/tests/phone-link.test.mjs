@@ -12,8 +12,13 @@ import { DEFAULT_SETTINGS, State } from "../src/core/state.ts";
 const CLAUDE = "integration_claude";
 
 let status = { enabled: true, running: true, port: 47821, host: "192.168.1.2", name: "PC", clients: 0, error: null };
+let publishAccepted = true;
 const original = internals.invoke;
-internals.invoke = async (cmd, args) => (cmd === "phone_link_status" ? status : original(cmd, args));
+internals.invoke = async (cmd, args) => {
+  if (cmd === "phone_link_status") return status;
+  const result = await original(cmd, args);
+  return cmd === "phone_link_publish" ? publishAccepted : result;
+};
 
 let asked;
 let dispose = () => {};
@@ -24,12 +29,13 @@ const island = {
 
 /** Lets the async status call settle (setImmediate is not mocked). */
 const settle = () => new Promise((resolve) => setImmediate(resolve));
-const tick = (ms) => mock.timers.tick(ms);
+const tick = async (ms) => { mock.timers.tick(ms); await settle(); };
 
 beforeEach(() => {
   mock.timers.enable({ apis: ["setTimeout"] });
   asked = [];
   calls.length = 0;
+  publishAccepted = true;
   status = { ...status, running: true };
   State.tasks = [];
   State.focusId = null;
@@ -52,6 +58,37 @@ test("the phone sees the agents, not the services", () => {
   const claude = sessions.find((s) => s.pillId === CLAUDE);
   assert.equal(claude.state, "idle");
   assert.equal(claude.statusText, "");
+});
+
+test("OpenCode state and last activity reach the phone snapshot without leaking the project path", () => {
+  State.upsertExternalAgent('agent_opencode', 'OpenCode', '#3b9eff');
+  const task = State.tasks.find(t => t.id === 'agent_opencode');
+  task.sessionId = 'opencode-session';
+  task.sessionCwd = 'C:\\private\\project';
+  State.appendStep(task.id, 'Running tests');
+  for (const state of ['working', 'approval', 'finished', 'error']) {
+    State.updateTask(task.id, state);
+    const session = linkSnapshot().sessions.find(s => s.pillId === task.id);
+    assert.equal(session.agent, 'OpenCode');
+    assert.equal(session.state, state);
+    assert.equal(session.statusText, 'Running tests');
+    assert.equal(session.project, 'project');
+    assert.ok(!JSON.stringify(session).includes('private'));
+  }
+});
+
+test("a link that starts after island startup publishes without a settings interaction", async () => {
+  status = { ...status, running: false };
+  dispose = registerPhoneLink(island);
+  await settle();
+  await tick(300);
+  assert.equal(sent('phone_link_publish').length, 0);
+  status = { ...status, running: true };
+  emit('phone-link-status-changed', null);
+  await settle();
+  await tick(300);
+  assert.equal(sent('phone_link_publish').length, 1);
+  assert.ok(sent('phone_link_publish')[0].sessions.some(s => s.pillId === CLAUDE));
 });
 
 test("a session carries its state, its last step and its progress", () => {
@@ -103,22 +140,59 @@ test("the phone gets the bare command, not the island's \"Bash · \" label", () 
 test("a burst of changes is one picture, and an unchanged picture is not sent again", async () => {
   dispose = registerPhoneLink(island);
   await settle();
-  tick(250);
+  await tick(250);
   assert.equal(sent("phone_link_publish").length, 1, "the whole picture goes out when the link is up");
 
   State.updateTask(CLAUDE, "working");
   State.appendStep(CLAUDE, "one");
   State.appendStep(CLAUDE, "two");
   assert.equal(sent("phone_link_publish").length, 1, "waits for the burst to end");
-  tick(250);
+  await tick(250);
   assert.equal(sent("phone_link_publish").length, 2);
   const last = sent("phone_link_publish")[1];
   assert.equal(last.sessions.find((s) => s.pillId === CLAUDE).statusText, "two");
   assert.equal(last.approval, null);
 
   State.notify(); // something redrew, nothing changed for the phone
-  tick(250);
+  await tick(250);
   assert.equal(sent("phone_link_publish").length, 2);
+});
+
+test("an authenticated phone requests a fresh snapshot even when the link already runs", async () => {
+  dispose = registerPhoneLink(island);
+  await settle();
+  await tick(250);
+  assert.equal(sent('phone_link_publish').length, 1);
+  emit('phone-link-sync', null);
+  await settle();
+  await tick(250);
+  assert.equal(sent('phone_link_publish').length, 2);
+});
+
+test("failed agent publication is retried and not cached as delivered", async () => {
+  publishAccepted = false;
+  dispose = registerPhoneLink(island);
+  await settle();
+  await tick(250);
+  assert.equal(sent('phone_link_publish').length, 1);
+  publishAccepted = true;
+  await tick(250);
+  assert.equal(sent('phone_link_publish').length, 2);
+  await tick(250);
+  assert.equal(sent('phone_link_publish').length, 2, 'accepted snapshot is not repeatedly resent');
+});
+
+test("publication retry is bounded and a reconnect can recover it", async () => {
+  publishAccepted = false;
+  dispose = registerPhoneLink(island);
+  await settle();
+  for (let i = 0; i < 6; i++) await tick(250);
+  assert.equal(sent('phone_link_publish').length, 3);
+  publishAccepted = true;
+  emit('phone-link-sync', null);
+  await settle();
+  await tick(250);
+  assert.equal(sent('phone_link_publish').length, 4);
 });
 
 test("while the link is off nothing is published", async () => {
@@ -127,7 +201,7 @@ test("while the link is off nothing is published", async () => {
   await settle();
   State.updateTask(CLAUDE, "working");
   State.appendStep(CLAUDE, "busy");
-  tick(1000);
+  await tick(1000);
   assert.equal(sent("phone_link_publish").length, 0);
 });
 
@@ -136,13 +210,13 @@ test("turning the link on in Settings sends the whole picture at once", async ()
   dispose = registerPhoneLink(island);
   await settle();
   State.updateTask(CLAUDE, "thinking");
-  tick(1000);
+  await tick(1000);
   assert.equal(sent("phone_link_publish").length, 0);
 
   status = { ...status, running: true };
   emit("settings-changed", {});
   await settle();
-  tick(250);
+  await tick(250);
   assert.equal(sent("phone_link_publish").length, 1);
   assert.equal(sent("phone_link_publish")[0].sessions.find((s) => s.pillId === CLAUDE).state, "thinking");
 
@@ -151,19 +225,19 @@ test("turning the link on in Settings sends the whole picture at once", async ()
   emit("settings-changed", {});
   await settle();
   State.updateTask(CLAUDE, "working");
-  tick(1000);
+  await tick(1000);
   assert.equal(sent("phone_link_publish").length, 1);
 });
 
 test("a request waiting for an answer is published, and withdrawn once it is answered", async () => {
   dispose = registerPhoneLink(island);
   await settle();
-  tick(250);
+  await tick(250);
   State.beginApproval({ requestId: "r1", sessionId: "s1", pillId: CLAUDE, tool: "Bash", command: "rm -rf build" });
-  tick(250);
+  await tick(250);
   assert.equal(sent("phone_link_publish").at(-1).approval.requestId, "r1");
   State.endApproval(); // answered at the desk
-  tick(250);
+  await tick(250);
   assert.equal(sent("phone_link_publish").at(-1).approval, null);
 });
 
@@ -255,22 +329,22 @@ test("a request without an id, or a question without options, is not offered", (
 test("the question is published when it appears and withdrawn when it is answered, and not repeated", async () => {
   dispose = registerPhoneLink(island);
   await settle();
-  tick(250);
+  await tick(250);
   const q = () => sent("phone_link_publish_question");
   assert.equal(q().length, 1, "the hub is told there is none when the link comes up");
   assert.equal(q()[0].question, null);
 
   State.beginApproval({ requestId: "q1", sessionId: "s1", pillId: CLAUDE, tool: "AskUserQuestion", command: "x", questions: [{ question: "A?", options: [{ label: "y", description: "" }], multiSelect: false }] });
-  tick(250);
+  await tick(250);
   assert.equal(q().length, 2);
   assert.equal(q()[1].question.requestId, "q1");
 
   State.notify();
-  tick(250);
+  await tick(250);
   assert.equal(q().length, 2, "unchanged: not sent again");
 
   State.endApproval();
-  tick(250);
+  await tick(250);
   assert.equal(q().length, 3);
   assert.equal(q()[2].question, null);
 });
@@ -278,24 +352,24 @@ test("the question is published when it appears and withdrawn when it is answere
 test("the outfit is published when the link comes up and whenever the wardrobe changes, and not repeated", async () => {
   dispose = registerPhoneLink(island);
   await settle();
-  tick(250);
+  await tick(250);
   const p = () => sent("phone_link_publish_prefs");
   assert.equal(p().length, 1);
   assert.equal(p()[0].outfit, "auto", "the default of the wardrobe");
 
   State.settings.mochiOutfit = "beanie";
   State.notify();
-  tick(250);
+  await tick(250);
   assert.equal(p().length, 2);
   assert.equal(p()[1].outfit, "beanie");
 
   State.notify();
-  tick(250);
+  await tick(250);
   assert.equal(p().length, 2, "unchanged: not sent again");
 
   State.settings.mochiOutfit = "topHat"; // a value no build knows: the wardrobe reads it as auto
   State.notify();
-  tick(250);
+  await tick(250);
   assert.equal(p().at(-1).outfit, "auto");
 });
 
@@ -337,7 +411,7 @@ test("a phone's request is answered to that phone only, and not while the link i
   const id = State.appendSessionDiff(CLAUDE, fromEdit("a\n", "b\n", "/x/y.ts"));
   dispose = registerPhoneLink(island);
   await settle();
-  tick(250);
+  await tick(250);
   emit("phone-link-getdiff", { conn: 5, pillId: CLAUDE, fileId: id });
   await settle();
   const sentDiffs = sent("phone_link_send_diff");
@@ -356,7 +430,7 @@ test("only the percentages and reset times of the plans are published, and not r
   State.codexPlanUsage = { sevenDay: { usedPct: 10, resetsAt: 2e12 }, resetCredits: 2, planType: "plus", updatedAt: 6 };
   dispose = registerPhoneLink(island);
   await settle();
-  tick(250);
+  await tick(250);
   const p = () => sent("phone_link_publish_usage");
   assert.equal(p().length, 1);
   assert.deepEqual(p()[0].usage.claude, { updatedAt: 5, fiveHour: { usedPct: 40, resetsAt: 2e12 } });
@@ -364,11 +438,11 @@ test("only the percentages and reset times of the plans are published, and not r
   assert.equal(p()[0].usage.codex.planType, "plus");
 
   State.notify();
-  tick(250);
+  await tick(250);
   assert.equal(p().length, 1, "unchanged: not sent again");
   State.planUsage = { fiveHour: { usedPct: 55, resetsAt: 2e12 }, updatedAt: 9 };
   State.notify();
-  tick(250);
+  await tick(250);
   assert.equal(p().length, 2);
   assert.equal(p()[1].usage.claude.fiveHour.usedPct, 55);
   State.planUsage = null;
@@ -420,20 +494,34 @@ test("a service that is not configured or is failing has no card, and n8n shows 
   for (const id of Object.keys(State.integrations)) delete State.integrations[id];
 });
 
+test("disposing the phone bridge removes all request and settings listeners", async () => {
+  dispose = registerPhoneLink(island);
+  await settle();
+  await tick(250);
+  dispose();
+  calls.length = 0;
+  for (const name of ["settings-changed", "phone-link-getdiff", "phone-link-decided", "phone-link-sync", "phone-link-status-changed"]) {
+    assert.throws(() => emit(name, null), /nothing listens/, `${name} listener was removed`);
+  }
+  await settle();
+  await tick(250);
+  assert.equal(calls.length, 0, "a disposed bridge must not call the native app");
+});
+
 test("service cards are published when the link comes up and when they change, and not repeated", async () => {
   service("integration_github", { totalStars: 3, totalRepos: 1 });
   dispose = registerPhoneLink(island);
   await settle();
-  tick(250);
+  await tick(250);
   const p = () => sent("phone_link_publish_services");
   assert.equal(p().length, 1);
   assert.equal(p()[0].services[0].id, "integration_github");
   State.notify();
-  tick(250);
+  await tick(250);
   assert.equal(p().length, 1);
   service("integration_github", { totalStars: 4, totalRepos: 1 });
   State.notify();
-  tick(250);
+  await tick(250);
   assert.equal(p().length, 2);
   for (const id of Object.keys(State.integrations)) delete State.integrations[id];
 });

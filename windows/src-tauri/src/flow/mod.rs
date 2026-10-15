@@ -115,9 +115,15 @@ fn is_terminal(id: &str) -> bool {
 
 // ── Setup, on and off ─────────────────────────────────────────────────────────
 
-pub fn setup(app: &AppHandle) {
+/// Register saved preferences/history before any webview can request them.
+/// Window creation and microphone/key listeners still belong to setup below.
+pub fn prepare(app: &AppHandle) {
     let flow = Arc::new(Flow { store: Mutex::new(Store::load()), running: Mutex::new(None) });
-    app.manage(flow.clone());
+    app.manage(flow);
+}
+
+pub fn setup(app: &AppHandle) {
+    let Some(flow) = get(app) else { return };
     pill::setup(app);
     let prefs = flow.store.lock().unwrap().prefs.clone();
     pill::update(app, |s| {

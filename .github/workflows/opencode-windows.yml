@@ -1,4 +1,4 @@
-name: OpenCode Windows test build
+name: OpenCode Windows candidate build
 
 on:
   workflow_dispatch:
@@ -52,13 +52,21 @@ jobs:
       - name: Native Rust tests
         run: cargo test --workspace --locked
 
-      - name: Build Windows app without publishing or installers
-        run: npm run tauri -- build --no-bundle
+      - name: Build Windows app and MSI candidate (no public release)
+        run: npm run tauri -- build --bundles msi
+
+      - name: Stage MSI installer
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installers = @(Get-ChildItem -LiteralPath target/release/bundle/msi -Filter *.msi -File)
+          if ($installers.Count -eq 0) { throw 'MSI installer was not produced' }
+          $installers | Copy-Item -Destination target/release
 
       - name: Record artifact checksums
         run: |
           $ErrorActionPreference = 'Stop'
           $paths = @('target/release/coucou.exe', 'target/release/coucou-hook.exe')
+          $paths += @(Get-ChildItem -LiteralPath target/release -Filter *.msi -File | ForEach-Object { $_.FullName })
           $lines = foreach ($path in $paths) {
             $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $path
             "$($hash.Hash.ToLowerInvariant())  $(Split-Path -Leaf $path)"
@@ -66,13 +74,14 @@ jobs:
           $lines | Set-Content -Encoding ascii target/release/SHA256SUMS.txt
           "Reviewed commit: $env:GITHUB_SHA" | Set-Content target/release/BUILD-REF.txt
 
-      - name: Upload portable test build
+      - name: Upload candidate executable and MSI installer
         uses: actions/upload-artifact@v7
         with:
           name: Coucou-OpenCode-Windows-${{ github.sha }}
           path: |
             windows/target/release/coucou.exe
             windows/target/release/coucou-hook.exe
+            windows/target/release/*.msi
             windows/target/release/SHA256SUMS.txt
             windows/target/release/BUILD-REF.txt
           if-no-files-found: error

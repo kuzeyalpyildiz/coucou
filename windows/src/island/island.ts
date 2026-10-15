@@ -12,6 +12,7 @@ import {
 } from "../core/layout";
 import { Sound } from "../core/sound";
 import { State } from "../core/state";
+import { answerInTerminal } from "./terminal";
 import { SPOTIFY_ID, islandDances } from "../core/spotify";
 import { BotEngine, hexToRGB } from "../mochi/engine";
 import { Greeting } from "../mochi/greeting";
@@ -217,8 +218,7 @@ export class Island {
         const req = State.pendingApproval;
         if (!req) return;
         Sound.play("blip");
-        void Bridge.approvalDecline(req.requestId);
-        this.closeApproval();
+        answerInTerminal(() => this.closeApproval());
       },
       toggleSound: () => {
         State.settings.soundEnabled = !State.settings.soundEnabled;

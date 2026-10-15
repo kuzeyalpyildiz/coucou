@@ -265,10 +265,12 @@ function render() {
     capsule.style.width = `${vertical() ? thickness : length}px`;
     capsule.style.height = `${vertical() ? length : thickness}px`;
   });
-  // Bubble first in the DOM: the flex direction puts it beside the pill.
+  // Never detach the capsule just to update a tooltip: removing a hovered
+  // button's ancestor fires pointerleave and can swallow its pending click.
   for (const old of root.querySelectorAll(".bubble")) old.remove();
   const b = bubble();
-  root.replaceChildren(...(b ? [b] : []), capsule);
+  if (capsule.parentElement !== root) root.append(capsule);
+  if (b) root.insertBefore(b, capsule);
   mochi.setState(state.phase === "thinking" || state.voice?.phase === "thinking" ? "thinking" : "idle");
   wake();
   // Where the mouse is taken, once the sizes have settled.

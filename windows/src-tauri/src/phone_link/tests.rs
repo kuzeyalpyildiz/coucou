@@ -249,6 +249,31 @@ fn a_paired_phone_gets_sessions_and_answers_the_request() {
 }
 
 #[test]
+fn only_authenticated_phones_request_a_fresh_desktop_snapshot() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Requests(AtomicUsize);
+    impl server::Features for Requests {
+        fn details(&self) -> bool { false }
+        fn request_snapshot(&self) { self.0.fetch_add(1, Ordering::SeqCst); }
+    }
+    block_on(async {
+        let requests = Arc::new(Requests(AtomicUsize::new(0)));
+        let rig = Rig::start_full(None, requests.clone()).await;
+        let mut stranger = Client::connect(rig.port, &rig.fingerprint).await.unwrap();
+        stranger.send(json!({ "type": "hello", "v": 1, "token": "wrong", "device": "stranger" })).await;
+        let _ = stranger.recv().await;
+        assert_eq!(requests.0.load(Ordering::SeqCst), 0);
+        let mut first = Client::paired(&rig).await;
+        first.expect("sessions").await;
+        assert_eq!(requests.0.load(Ordering::SeqCst), 1);
+        drop(first);
+        let mut again = Client::paired(&rig).await;
+        again.expect("sessions").await;
+        assert_eq!(requests.0.load(Ordering::SeqCst), 2);
+    });
+}
+
+#[test]
 fn a_wrong_token_is_refused_and_gets_nothing() {
     block_on(async {
         let rig = Rig::start().await;

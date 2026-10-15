@@ -101,6 +101,11 @@ body {
   flex-direction: column;
 }
 
+/* Keep side-mounted capsules against their screen edge when a tooltip appears. */
+.vertical .capsule {
+  order: -1;
+}
+
 .mochi {
   width: 22px;
   height: 22px;

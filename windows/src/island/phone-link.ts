@@ -146,18 +146,45 @@ export function registerPhoneLink(island: Island): () => void {
   /** The service cards last sent, as JSON; "" before anything was. */
   let lastServices = "";
   let timer: number | null = null;
+  let disposed = false;
+  let unlistenStatus: (() => void) | undefined;
+  let unlistenSync: (() => void) | undefined;
+  let refreshVersion = 0;
+  let linkVersion = 0;
+  let publishing = false;
+  let failures = 0;
+  const unlisteners: (() => void)[] = [];
+  const retainListener = (unlisten: () => void) => {
+    if (disposed) unlisten();
+    else unlisteners.push(unlisten);
+  };
 
   const publish = () => {
     timer = null;
-    publishQuestion();
-    publishOutfit();
-    publishUsage();
-    publishServices();
+    if (!running || disposed) return;
     const snapshot = linkSnapshot();
     const key = JSON.stringify(snapshot);
-    if (key === last) return;
-    last = key;
-    void Bridge.phoneLinkPublish(snapshot.sessions, snapshot.approval);
+    if (!publishing && key !== last) {
+      publishing = true;
+      const version = linkVersion;
+      void Bridge.phoneLinkPublish(snapshot.sessions, snapshot.approval).then(accepted => {
+        if (version !== linkVersion) return;
+        if (accepted === true) {
+          last = key;
+          failures = 0;
+        } else {
+          failures++;
+          if (failures === 3) void Bridge.log("phone link: agent snapshot delivery failed after 3 attempts");
+        }
+      }).finally(() => {
+        publishing = false;
+        if (!disposed && running && failures < 3 && JSON.stringify(linkSnapshot()) !== last) schedule(false);
+      });
+    }
+    // Auxiliary cards must not block the core agent snapshot publication.
+    for (const send of [publishQuestion, publishOutfit, publishUsage, publishServices]) {
+      try { send(); } catch { void Bridge.log("phone link: auxiliary snapshot could not be prepared"); }
+    }
   };
 
   const publishQuestion = () => {
@@ -190,16 +217,21 @@ export function registerPhoneLink(island: Island): () => void {
     void Bridge.phoneLinkPublishServices(cards);
   };
 
-  const schedule = () => {
+  const schedule = (resetFailures = true) => {
+    if (resetFailures) failures = 0;
     if (!running || timer != null) return;
     timer = window.setTimeout(publish, DEBOUNCE_MS);
   };
 
-  const refresh = async () => {
+  const refresh = async (force = false) => {
+    const version = ++refreshVersion;
     const status = await Bridge.phoneLinkStatus();
+    if (disposed || version !== refreshVersion || !status) return;
     const now = status?.running ?? false;
-    if (now === running) return;
+    if (now === running && !force) return;
     running = now;
+    linkVersion++;
+    failures = 0;
     last = ""; // a link that has just come up needs the whole picture
     lastQuestion = "";
     lastOutfit = "";
@@ -212,20 +244,36 @@ export function registerPhoneLink(island: Island): () => void {
     }
   };
 
-  const unsubscribe = State.subscribe(schedule);
+  const unsubscribe = State.subscribe(() => schedule());
   // Turning the link on or off in Settings reaches the island as settings-changed.
-  void onEvent("settings-changed", () => void refresh());
+  void onEvent("settings-changed", () => void refresh()).then(retainListener);
   // The phone answered: Rust has already told the agent; the card goes.
   void onEvent<string>("phone-link-decided", (requestId) => {
     if (State.pendingApproval?.requestId === requestId) dropPendingCard(island);
-  });
+  }).then(retainListener);
   // A phone asked for a file's diff: the answer goes to that phone only (Rust cuts it to the limits).
   void onEvent<{ conn: number; pillId: string; fileId: number }>("phone-link-getdiff", (ask) => {
     if (!running || typeof ask?.conn !== "number") return;
     void Bridge.phoneLinkSendDiff(ask.conn, linkDiff(String(ask.pillId), Number(ask.fileId)));
+  }).then(retainListener);
+  // Listen before the initial read: startup can start the link after the
+  // island's first status request, without any settings change.
+  void onEvent("phone-link-status-changed", () => void refresh()).then((unlisten) => {
+    if (disposed) unlisten();
+    else {
+      unlistenStatus = unlisten;
+      void refresh();
+    }
   });
-  void refresh();
+  void onEvent("phone-link-sync", () => void refresh(true)).then(unlisten => {
+    if (disposed) unlisten();
+    else unlistenSync = unlisten;
+  });
   return () => {
+    disposed = true;
+    unlistenStatus?.();
+    unlistenSync?.();
+    for (const unlisten of unlisteners) unlisten();
     unsubscribe();
     if (timer != null) window.clearTimeout(timer);
     timer = null;

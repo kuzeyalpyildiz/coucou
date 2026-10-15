@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { fileURLToPath } from "node:url";
-import { internals } from "./tauri.mjs";
+import { internals, eventInternals } from "./tauri.mjs";
 
 // The sources import each other without an extension, which Vite resolves.
 registerHooks({
@@ -30,3 +30,4 @@ registerHooks({
 // The island reaches timers and Tauri through `window`.
 globalThis.window = globalThis;
 globalThis.__TAURI_INTERNALS__ = internals;
+globalThis.__TAURI_EVENT_PLUGIN_INTERNALS__ = eventInternals;

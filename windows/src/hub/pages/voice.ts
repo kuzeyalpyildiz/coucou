@@ -51,7 +51,7 @@ export async function voicePage(page: HTMLElement, ctx: HubContext) {
       row(t("Local app commands"),
         t("Say OK Coucou, open Spotify. Uses the local voice model, not AI credits. Dictation is unchanged. The microphone stays open while enabled."),
         toggle(prefs.voiceCommands, (on) => void ctx.setPrefs((p) => (p.voiceCommands = on)).then(() => ctx.navigate("voice")))),
-      h("div", { class: "hub-note", text: t("Only installed Start menu shortcuts can be launched. If names are ambiguous, no app opens; repeat with the full name. Responses are text only. Commands currently use English: open, launch, or start.") }),
+      h("div", { class: "hub-note", text: t("Opens registered Windows apps, including system apps. Duplicate app identities are merged; genuinely different matches need a more specific name. Responses are text only. English commands: open, launch, or start.") }),
       ...(!ready && prefs.voiceCommands ? [h("div", { class: "hub-warn", text: t("Download the voice model so Coucou can hear you.") })] : []),
     ));
   }

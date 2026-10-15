@@ -149,11 +149,17 @@ against its SHA-256, kept in Coucou's data folder under `Models`).
 Local app commands are off by default and keep the microphone open only after
 you enable them. The installed Parakeet model is required; enabling the switch
 does not download it. Commands currently use English **open**, **launch**, or
-**start**, followed by an installed Start menu shortcut's name. Only `.lnk`
-shortcuts in the user/system Start menu are eligible, not arbitrary spoken
-paths, URLs or shell commands. Store apps without a Start menu shortcut may
-not be found. Exact names take priority; ambiguous matches open nothing and
-show the matching names so you can repeat with a full name. Results appear as
+**start**, followed by an installed app's name. Windows Shell's AppsFolder
+catalog supplies desktop and packaged apps; the selected Shell item is activated
+directly through its PIDL, not a spoken path or Explorer command line. Fixed
+system-app aliases cover Notepad, Calculator, Paint, File Explorer, Task Manager,
+Command Prompt and Settings even without shortcuts (optional apps must already
+be installed). Duplicate canonical app identities are merged. Exact names take
+priority over aliases and partial names; genuinely different matches open
+nothing and ask for a more specific name. No automatic spelling guesses or
+arbitrary spoken paths, URLs, arguments or shell commands are executed. App
+discovery only runs on an explicit command, with a bounded catalog scan and
+no background app-indexing process. Results appear as
 text in Mochi's pill, with no online speech output. Listening pauses during
 dictation and call recording. Disable **Local app commands** to stop this
 listener (the separate AI assistant can still listen if its switch is on).

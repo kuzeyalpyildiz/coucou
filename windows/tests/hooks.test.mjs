@@ -168,6 +168,7 @@ test("an alert on an island that is already open only switches its view", () => 
 });
 
 test("a session finishing behind another pill only badges its own, for 5.2 s", () => {
+  State.mode = "expanded";
   State.setFocus("integration_n8n");
   hook({ hook_event_name: "Stop" });
   assert.deepEqual(asked, []);
@@ -291,6 +292,17 @@ test("an agent's turn ending takes its card down and gives the front back", () =
   // The stop no longer has the front: its pill is badged, the view is not taken.
   assert.equal(task("agent_codex").pillBadge, "finished");
   assert.ok(!asked.includes("alert:finished"));
+});
+
+test("a background agent finishing opens a completion popup when the notch is collapsed", () => {
+  State.mode = "compact";
+  State.setFocus("integration_n8n");
+  hook({ hook_event_name: "PreToolUse", coucou_agent: "opencode", session_id: "opencode-one", tool_name: "Bash" });
+  asked = [];
+  hook({ hook_event_name: "Stop", coucou_agent: "opencode", session_id: "opencode-one" });
+  assert.equal(task("agent_opencode").state, "finished");
+  assert.equal(State.focusId, "agent_opencode");
+  assert.deepEqual(asked, ["alert:finished"]);
 });
 
 test("OpenCode text questions are shown and only their matching cancellation closes them", () => {
@@ -612,6 +624,7 @@ test("a question within 5.2 s of a stop stays a question", () => {
 test("a failed stop within 5.2 s of a stop stays an error, badge included", () => {
   afterStop({ hook_event_name: "StopFailure" });
   assert.equal(task().state, "error");
+  State.mode = "expanded";
   State.setFocus("integration_n8n");
   afterStop({ hook_event_name: "StopFailure" });
   assert.equal(task().state, "error");
@@ -619,6 +632,7 @@ test("a failed stop within 5.2 s of a stop stays an error, badge included", () =
 });
 
 test("a new turn behind another pill drops the finished badge straight away", () => {
+  State.mode = "expanded";
   State.setFocus("integration_n8n");
   hook({ hook_event_name: "Stop" });
   assert.equal(task().pillBadge, "finished");
