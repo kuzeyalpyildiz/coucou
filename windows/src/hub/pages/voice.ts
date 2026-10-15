@@ -46,6 +46,15 @@ export async function voicePage(page: HTMLElement, ctx: HubContext) {
   page.append(ctx.hero("voice", "OK Coucou", t("Say « OK Coucou », then ask anything: add a pill, play music, the weather, an email to prepare.")));
 
   const ready = status.models.parakeet.state === "ready";
+  if (navigator.userAgent.includes("Windows")) {
+    page.append(card(
+      row(t("Local app commands"),
+        t("Say OK Coucou, open Spotify. Uses the local voice model, not AI credits. Dictation is unchanged. The microphone stays open while enabled."),
+        toggle(prefs.voiceCommands, (on) => void ctx.setPrefs((p) => (p.voiceCommands = on)).then(() => ctx.navigate("voice")))),
+      h("div", { class: "hub-note", text: t("Only installed Start menu shortcuts can be launched. If names are ambiguous, no app opens; repeat with the full name. Responses are text only. Commands currently use English: open, launch, or start.") }),
+      ...(!ready && prefs.voiceCommands ? [h("div", { class: "hub-warn", text: t("Download the voice model so Coucou can hear you.") })] : []),
+    ));
+  }
   page.append(label(t("Listening")));
   const main = card(
     row(t("Listen for « OK Coucou »"), t("The microphone stays open; only what follows « OK Coucou » goes further."),

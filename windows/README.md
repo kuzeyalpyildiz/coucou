@@ -144,6 +144,30 @@ against its SHA-256, kept in Coucou's data folder under `Models`).
 | Hover the pill at the bottom of the screen | Dictate, record a call, open Coucou. Put the pill on the left or right edge in Flow → Settings |
 | Click **Record a call** | Your microphone and what the computer plays, transcribed live, then written person by person with a summary and to-dos by Claude (your key). The audio is deleted once the transcript is written |
 | Say **« OK Coucou »**, then ask | Claude (your key) answers in the pill and out loud: pills, Spotify, your services' numbers, your agents, web search, open an app, an email prepared in your mail app. Turn it on in Notch → OK Coucou |
+| Enable **Local app commands** in **OK Coucou** (Windows), then say **“OK Coucou, open Spotify”** | Parakeet recognizes the command locally. No AI key, AI credits or online transcription needed. Normal dictation stays unchanged. |
+
+Local app commands are off by default and keep the microphone open only after
+you enable them. The installed Parakeet model is required; enabling the switch
+does not download it. Commands currently use English **open**, **launch**, or
+**start**, followed by an installed Start menu shortcut's name. Only `.lnk`
+shortcuts in the user/system Start menu are eligible, not arbitrary spoken
+paths, URLs or shell commands. Store apps without a Start menu shortcut may
+not be found. Exact names take priority; ambiguous matches open nothing and
+show the matching names so you can repeat with a full name. Results appear as
+text in Mochi's pill, with no online speech output. Listening pauses during
+dictation and call recording. Disable **Local app commands** to stop this
+listener (the separate AI assistant can still listen if its switch is on).
+
+For a fully local launcher, leave the separate Claude assistant switch off.
+When both are enabled, app commands stay local, while other requests can go
+to Claude as before.
+
+Manual Windows checks before release (not yet device-verified): enable commands
+with dictation and AI voice off; launch a unique shortcut; try an unknown name
+and an ambiguous prefix; verify neither opens an unrelated app; check normal
+dictation still pastes “open Spotify” as text while commands are listening;
+disable commands and confirm wake phrases no longer act; restart and verify
+the saved preference. Ask before recording or downloading a speech model.
 
 Your voice never leaves the computer. With Claude's clean-up (Flow → Styles),
 a call's summary or « OK Coucou », the text — never the audio — goes to

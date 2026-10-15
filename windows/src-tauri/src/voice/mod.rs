@@ -4,8 +4,9 @@
 // While it is on, the microphone is open and a cheap energy detector cuts what
 // you say into stretches; only a stretch of speech goes to Parakeet, on this
 // computer, and only a stretch that starts with « OK Coucou » goes further:
-// what you said after it goes to Claude with your own key (brain.rs), never
-// the audio. Mochi shows it all in the pill at the bottom of the screen —
+// local app commands are handled without a model request (commands.rs).
+// With the separate AI assistant enabled, other requests go to Claude with
+// your own key (brain.rs), never the audio. Mochi shows it in the bottom pill —
 // listening, thinking, then the answer, said out loud by the system's voice
 // (the pill's speechSynthesis) or ElevenLabs with your key.
 //
@@ -14,6 +15,7 @@
 
 pub mod brain;
 pub mod wake;
+pub mod commands;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -60,9 +62,13 @@ pub fn requirements_met() -> bool {
 
 /// Starts or stops listening to follow the preference.
 pub fn sync(app: &AppHandle) {
-    let wanted = crate::flow::get(app).is_some_and(|f| f.store.lock().unwrap().prefs.voice);
+    let (assistant, commands) = crate::flow::get(app).map(|f| {
+        let store = f.store.lock().unwrap();
+        (store.prefs.voice, store.prefs.voice_commands && cfg!(windows))
+    }).unwrap_or_default();
+    let wanted = (assistant && requirements_met()) || (commands && speech::is_ready());
     let mut running = RUNNING.lock().unwrap();
-    match (wanted && requirements_met(), running.is_some()) {
+    match (wanted, running.is_some()) {
         (true, false) => {
             let stop = Arc::new(AtomicBool::new(false));
             let app2 = app.clone();
@@ -190,7 +196,36 @@ fn run(app: AppHandle, stop: Arc<AtomicBool>) {
             let Some(question) = question else { continue };
             mode = Mode::Wake;
             vad.hangover = 25;
+            // Recognition can take time. Dictation/recording may have started,
+            // or listening may have been disabled, since this segment began.
+            if stop.load(Ordering::Relaxed) || pill::dictating(&app) || crate::notes::is_recording(&app) {
+                vad.reset();
+                continue;
+            }
             show(&app, Some(VoiceView { phase: "thinking".into(), heard: question.clone(), answer: String::new() }));
+            let (assistant, commands) = crate::flow::get(&app).map(|f| {
+                let store = f.store.lock().unwrap();
+                (store.prefs.voice, store.prefs.voice_commands && cfg!(windows))
+            }).unwrap_or_default();
+            if commands {
+                // This path never calls the AI brain or online speech output.
+                // Normal dictation has its own capture/process path, unchanged.
+                let result = commands::respond(&question, || {
+                    !stop.load(Ordering::Relaxed) && !pill::dictating(&app) && !crate::notes::is_recording(&app)
+                        && crate::flow::get(&app).is_some_and(|f| f.store.lock().unwrap().prefs.voice_commands)
+                });
+                if result.is_some() || !assistant {
+                    show(&app, Some(VoiceView {
+                        phase: "speaking".into(), heard: question,
+                        answer: result.unwrap_or_else(|| "Say OK Coucou, open, then an installed app's name.".into()),
+                    }));
+                    hide_at = Some(Instant::now() + Duration::from_secs(8));
+                    vad.reset();
+                    while rx.try_recv().is_ok() {}
+                    continue;
+                }
+            }
+            if !assistant { continue; }
             let reply = brain.respond(&app, &question);
             let answer = reply.as_ref().map(|r| r.text.clone()).unwrap_or_default();
             if answer.is_empty() {

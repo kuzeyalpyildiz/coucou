@@ -103,6 +103,8 @@ pub struct Prefs {
     pub open_at_launch: bool,
     /// « OK Coucou »: listen for it and answer with Claude (needs the Claude key).
     pub voice: bool,
+    /// Local, opt-in app commands. Independent from dictation and Claude voice.
+    pub voice_commands: bool,
     /// How Coucou answers out loud: "system", "elevenlabs" or "off".
     pub voice_output: String,
     /// The ElevenLabs voice: "female" or "male".
@@ -122,6 +124,7 @@ impl Default for Prefs {
             summary_engine: SummaryEngine::Claude,
             open_at_launch: true,
             voice: false,
+            voice_commands: false,
             voice_output: "system".into(),
             voice_gender: "female".into(),
         }
@@ -388,5 +391,17 @@ mod tests {
         assert_eq!(p.key, FlowKey::RightAlt);
         assert_eq!(p.keep_days, 30);
         assert!(p.open_at_launch);
+        assert!(!p.voice_commands, "upgrades must never turn on microphone commands");
+        assert!(!p.voice);
+    }
+
+    #[test]
+    fn app_commands_are_independent_from_dictation_and_ai_voice() {
+        let p: Prefs = serde_json::from_str(r#"{"voiceCommands":true}"#).unwrap();
+        assert!(p.voice_commands);
+        assert!(!p.enabled);
+        assert!(!p.voice);
+        let saved = serde_json::to_value(&p).unwrap();
+        assert_eq!(saved["voiceCommands"], true);
     }
 }
