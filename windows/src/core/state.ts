@@ -50,6 +50,7 @@ export interface ApprovalInfo {
   command: string;
   /** Set when Claude Code is asking a question rather than for a permission. */
   questions?: AskedQuestion[];
+  sourceId?: string;
 }
 
 /** One question of an AskUserQuestion call. */
@@ -57,6 +58,7 @@ export interface AskedQuestion {
   question: string;
   options: { label: string; description: string }[];
   multiSelect: boolean;
+  custom?: boolean;
 }
 
 export interface ChatMessage {

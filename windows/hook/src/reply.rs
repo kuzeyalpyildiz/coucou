@@ -12,7 +12,7 @@ use serde_json::{json, Map, Value};
 /// (no `--agent`), Codex, Copilot CLI and Muse Code. Any decision for another
 /// agent is ignored here too, whatever the app sent.
 pub fn takes_decisions(agent: &str) -> bool {
-    matches!(agent, "" | "codex" | "copilot" | "muse")
+    matches!(agent, "" | "codex" | "copilot" | "muse" | "opencode")
 }
 
 /// Agents that read a JSON object on stdout after every hook and get `{}` —
@@ -51,7 +51,7 @@ pub fn stdout(agent: &str, event: &str, decision: Option<&str>, question: Option
         }
         // Claude Code and Codex share the documented hookSpecificOutput. Only
         // Claude Code asks questions.
-        "" => decision.and_then(|d| decision_json(d, question)),
+        "" | "opencode" => decision.and_then(|d| decision_json(d, question)),
         _ => decision.and_then(|d| decision_json(d, None)),
     }
 }
@@ -115,7 +115,7 @@ fn answers_fit(question: &Value, answers: &Map<String, Value>) -> bool {
             .unwrap_or_default();
         let multi = item.get("multiSelect").and_then(|m| m.as_bool()).unwrap_or(false);
         match answers.get(text) {
-            Some(Value::String(pick)) if !multi => labels.contains(&pick.as_str()),
+            Some(Value::String(pick)) if !multi => labels.contains(&pick.as_str()) || item.get("custom").and_then(Value::as_bool) == Some(true),
             Some(Value::Array(picks)) if multi => {
                 let picks: Vec<&str> = picks.iter().filter_map(|p| p.as_str()).collect();
                 let mut seen = picks.clone();
@@ -131,6 +131,17 @@ fn answers_fit(question: &Value, answers: &Map<String, Value>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opencode_requires_a_click_and_preserves_question_answers() {
+        assert!(stdout("opencode", "PermissionRequest", None, None).is_none());
+        let question = json!({"questions":[{"question":"Notes (1)","custom":true,"options":[]}]});
+        let decision = r#"{"answers":{"Notes (1)":"typed answer"}}"#;
+        let output = stdout("opencode", "PermissionRequest", Some(decision), Some(&question)).unwrap();
+        let parsed: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(parsed["hookSpecificOutput"]["decision"]["updatedInput"]["answers"]["Notes (1)"], "typed answer");
+        assert!(stdout("opencode", "PermissionRequest", Some(decision), None).is_none());
+    }
 
     const AGENTS: &[&str] = &[
         "", "gemini", "antigravity", "cursor", "codex", "copilot", "muse", "opencode", "amp",

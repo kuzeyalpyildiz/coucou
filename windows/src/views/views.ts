@@ -559,13 +559,14 @@ function buildQuestion(actions: ViewActions): ViewHost {
   // far, and what is ticked in a pick-several question.
   let requestId = "";
   let index = 0;
-  let answers: Record<string, string | string[]> = {};
+  let answers: Record<string, string | string[]> = Object.create(null);
   let picked = new Set<string>();
   // The buttons are only rebuilt when what they show changes: rebuilding them
   // between a mouse-down and a mouse-up would swallow the click.
   let rowKey = "";
 
-  const next = (question: string, answer: string | string[], total: number) => {
+  const next = (question: string, answer: string | string[], total: number, expectedRequest: string, expectedIndex: number) => {
+    if (State.pendingApproval?.requestId !== expectedRequest || index !== expectedIndex) return;
     answers[question] = answer;
     picked = new Set();
     index += 1;
@@ -597,7 +598,7 @@ function buildQuestion(actions: ViewActions): ViewHost {
       if (State.pendingApproval!.requestId !== requestId) {
         requestId = State.pendingApproval!.requestId;
         index = 0;
-        answers = {};
+        answers = Object.create(null);
         picked = new Set();
       }
       const q = questions[Math.min(index, questions.length - 1)];
@@ -612,11 +613,13 @@ function buildQuestion(actions: ViewActions): ViewHost {
       if (rowKey === key) return;
       rowKey = key;
       clear(row);
+      const displayedRequest = requestId;
+      const displayedIndex = index;
       for (const option of q.options) {
         const on = picked.has(option.label);
         const button = btn(option.label, on ? "primary" : "secondary", () => {
           if (!q.multiSelect) {
-            next(q.question, option.label, questions.length);
+            next(q.question, option.label, questions.length, displayedRequest, displayedIndex);
             return;
           }
           if (on) picked.delete(option.label);
@@ -626,9 +629,19 @@ function buildQuestion(actions: ViewActions): ViewHost {
         if (option.description) button.title = option.description;
         row.append(button);
       }
+      if (q.custom && !q.multiSelect) {
+        const input = h("input", { type: "text", "aria-label": q.question }) as HTMLInputElement;
+        const submit = () => {
+          if (input.value.trim()) next(q.question, input.value, questions.length, displayedRequest, displayedIndex);
+        };
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" && !event.isComposing) submit();
+        });
+        row.append(input, btn(tl("Done"), "primary", submit));
+      }
       if (q.multiSelect) {
         const done = btn(tl("Done"), "primary", () => {
-          if (picked.size > 0) next(q.question, [...picked], questions.length);
+          if (picked.size > 0) next(q.question, [...picked], questions.length, displayedRequest, displayedIndex);
         });
         if (picked.size === 0) done.classList.add("off");
         row.append(done);

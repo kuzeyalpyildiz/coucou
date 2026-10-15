@@ -242,7 +242,7 @@ test("an agent's pill goes away when its session ends, or 5.2 s after it stops",
 });
 
 test("an agent's permission request is declined, never shown as Claude Code's", () => {
-  for (const agent of ["gemini", "antigravity", "cursor", "opencode", "amp", "hermes", "my-tool"]) {
+  for (const agent of ["gemini", "antigravity", "cursor", "amp", "hermes", "my-tool"]) {
     calls.length = 0;
     hook({ hook_event_name: "PermissionRequest", request_id: "r1", coucou_agent: agent, tool_name: "Bash" });
     assert.deepEqual(sent("approval_decline"), [{ requestId: "r1" }], agent);
@@ -251,8 +251,8 @@ test("an agent's permission request is declined, never shown as Claude Code's", 
   }
 });
 
-test("Codex, Copilot CLI and Muse Code get the card on their own pill", () => {
-  for (const agent of ["codex", "copilot", "muse"]) {
+test("supported agents including OpenCode get the card on their own pill", () => {
+  for (const agent of ["codex", "copilot", "muse", "opencode"]) {
     State.pendingApproval = null;
     State.focusId = CLAUDE;
     calls.length = 0;
@@ -291,6 +291,20 @@ test("an agent's turn ending takes its card down and gives the front back", () =
   // The stop no longer has the front: its pill is badged, the view is not taken.
   assert.equal(task("agent_codex").pillBadge, "finished");
   assert.ok(!asked.includes("alert:finished"));
+});
+
+test("OpenCode text questions are shown and only their matching cancellation closes them", () => {
+  hook({
+    hook_event_name: "PermissionRequest", request_id: "r-text", session_id: "s-text",
+    coucou_agent: "opencode", coucou_source_id: "frm-text", tool_name: "AskUserQuestion",
+    tool_input: { questions: [{ question: "Notes (1)", options: [], custom: true }] },
+  });
+  assert.equal(State.pendingApproval.questions[0].custom, true);
+  assert.equal(task("agent_opencode").state, "question");
+  hook({ hook_event_name: "OpenCodeFormClosed", session_id: "s-text", coucou_agent: "opencode", coucou_source_id: "frm-other" });
+  assert.equal(State.pendingApproval.requestId, "r-text");
+  hook({ hook_event_name: "OpenCodeFormClosed", session_id: "s-text", coucou_agent: "opencode", coucou_source_id: "frm-text" });
+  assert.equal(State.pendingApproval, null);
 });
 
 test("an agent's card comes up at once when its pill has the focus", () => {

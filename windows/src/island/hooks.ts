@@ -50,6 +50,7 @@ const TURN_OVER = new Set(["Stop", "StopFailure", "UserPromptSubmit", "SessionEn
 interface HookPayload {
   hook_event_name?: string;
   request_id?: string;
+  coucou_source_id?: string;
   session_id?: string;
   cwd?: string;
   message?: string;
@@ -161,7 +162,7 @@ function approvalTarget(tool: string, input: Record<string, unknown>): string {
  * The questions of an AskUserQuestion call, if the island can show all of them
  * as options to pick from. Anything it cannot is left to the terminal.
  */
-function askedQuestions(tool: string, input: Record<string, unknown>): AskedQuestion[] | null {
+function askedQuestions(tool: string, input: Record<string, unknown>, openCode = false): AskedQuestion[] | null {
   if (tool !== "AskUserQuestion" || !Array.isArray(input.questions)) return null;
   const out: AskedQuestion[] = [];
   for (const raw of input.questions as Record<string, unknown>[]) {
@@ -173,8 +174,9 @@ function askedQuestions(tool: string, input: Record<string, unknown>): AskedQues
         description: typeof o.description === "string" ? o.description : "",
       }));
     // A question cut short by the relay would be answered under the wrong text.
-    if (!question || question.endsWith("…") || options.length < 2) return null;
-    out.push({ question, options, multiSelect: raw.multiSelect === true });
+    const custom = openCode && raw.custom === true;
+    if (!question || question.endsWith("…") || (options.length < (openCode ? 1 : 2) && !custom)) return null;
+    out.push({ question, options, multiSelect: raw.multiSelect === true, ...(custom ? { custom: true } : {}) });
   }
   return out.length > 0 ? out : null;
 }
@@ -453,6 +455,14 @@ function handleHook(island: Island, payload: HookPayload) {
       State.appendStep(agentId, t("• subagent done"));
       break;
 
+    case "OpenCodeFormClosed": {
+      if (validAgent === "opencode" && State.pendingApproval?.sourceId === payload.coucou_source_id &&
+          State.pendingApproval?.sessionId === sessionId && payload.coucou_source_id) {
+        void Bridge.approvalDecline(State.pendingApproval.requestId);
+        dropPendingCard(island);
+      }
+      break;
+    }
     case "PermissionRequest": {
       // Only Claude Code and the agents the relay can answer for (Codex, Copilot
       // CLI, Muse Code — same as the Mac) get a card. Anyone else's request is
@@ -478,7 +488,11 @@ function handleHook(island: Island, payload: HookPayload) {
       // Claude Code asking a question is not a permission to grant: the island
       // shows the options and sends back the one that was picked. Only Claude
       // Code asks questions this way.
-      const questions = isExternalAgent ? null : askedQuestions(tool, input);
+       const questions = isExternalAgent && validAgent !== "opencode" ? null : askedQuestions(tool, input, validAgent === "opencode");
+       if (validAgent === "opencode" && tool === "AskUserQuestion" && !questions) {
+         if (requestId) void Bridge.approvalDecline(requestId);
+         break;
+       }
       const view = questions ? "question" : "approval";
       // The card always comes up, even over another pill or an island that is
       // already open: its pill comes to the front, and the one you were on
@@ -489,7 +503,8 @@ function handleHook(island: Island, payload: HookPayload) {
         pillId: agentId,
         tool,
         command: approvalTarget(tool, input),
-        ...(questions ? { questions } : {}),
+         ...(questions ? { questions } : {}),
+         ...(validAgent === "opencode" && payload.coucou_source_id ? { sourceId: payload.coucou_source_id } : {}),
       });
       // The relay's short ack window closes in 800 ms; everything below this
       // line is synchronous, so the card really is up by the time it lands.

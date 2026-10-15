@@ -386,7 +386,7 @@ Linux.
 | Antigravity | `.gemini\config\hooks.json` (a `coucou` hook group) | asked in Antigravity |
 | Cursor Agent | `.cursor\hooks.json` — Claude Code in Cursor's terminal also goes on the Cursor pill, through the Claude Code hooks | asked in Cursor |
 | Claude Desktop (Windows) | nothing to install: Claude Code sessions from the Claude app are tagged by the relay | asked in the Claude app |
-| OpenCode | plugin `.config\opencode\plugins\coucou.js` | asked in OpenCode |
+| OpenCode | plugin `.config\opencode\plugins\coucou.js` | V2: Allow/Deny and simple question forms; V1: asked in OpenCode |
 | Amp | plugin `.config\amp\plugins\coucou.ts` | asked in Amp |
 | Hermes Agent | plugin `.hermes\plugins\coucou\` — then `hermes plugins enable coucou` once | asked in Hermes |
 | Any other | run `coucou-hook --agent <name> [<Event>]` from your tool's hooks | asked in the tool |
@@ -398,8 +398,16 @@ own: with no click it prints no decision at all (`{}` for the agents that need
 JSON, `"ask"` for Copilot, which is fail-closed), so the agent asks in its own
 terminal exactly as without Coucou — including when Coucou is closed.
 
-The plugins start the relay directly, with no shell in between, and never wait
-for it. Amp's steps appear as each tool finishes: its "before" hook must return
+The plugins start the relay directly, with no shell in between. Status events
+never wait for a reply. OpenCode V2 waits only for an explicit permission decision;
+on timeout or relay failure its native approval prompt takes over. Configured
+allow/deny rules are unchanged, and no approval is remembered by this plugin.
+Simple OpenCode forms support Yes/No, single/multiple choices and typed text.
+Conditional, hidden, numeric and external fields remain in OpenCode. Answers
+are submitted only to the original, still-pending form. Build this fork's app
+and relay together, then reinstall the plugin from Settings and restart OpenCode;
+replacing only the plugin does not update the installed app's capabilities.
+Amp's steps appear as each tool finishes: its "before" hook must return
 a verdict, and Coucou never gives one.
 
 **How each agent runs the relay on Windows.** Hook commands are written for the
