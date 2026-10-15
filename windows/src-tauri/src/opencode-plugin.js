@@ -10,6 +10,13 @@ const EVENTS = {
   'session.deleted': 'SessionEnd',
 };
 
+// V2 also publishes completion as a status transition. Never infer completion
+// from a tool ending: the agent may still be thinking or starting another tool.
+function lifecycleEvent(type, data) {
+  if (type === 'session.status') return data?.status?.type === 'idle' ? 'Stop' : undefined;
+  return EVENTS[type];
+}
+
 export function sameDirectory(left, right, windows = process.platform === 'win32') {
   const normalize = (value) => {
     const path = String(value || '').replace(/\\/g, '/').replace(/\/+$/, '');
@@ -85,7 +92,7 @@ export const CoucouPlugin = async ({ directory } = {}) => {
   };
   return {
     event: async ({ event }) => {
-      const name = EVENTS[event?.type];
+      const name = lifecycleEvent(event?.type, event?.properties);
       const id = event?.properties?.sessionID || event?.properties?.info?.id;
       if (name && id) forward(name, { session_id: id });
     },
@@ -257,7 +264,7 @@ export default {
                 ...f, coucou_source_id: e.data.id,
               })).catch(() => {});
             }
-            const name = EVENTS[e.type];
+            const name = lifecycleEvent(e.type, e.data);
             const id = e.data?.sessionID;
             if (name && id) void fields(id).then((f) => relay(name, f)).catch(() => {});
           }

@@ -67,6 +67,20 @@ async function fixture(reply, options = {}) {
     questionForm: module.namespace.questionForm, sameDirectory: module.namespace.sameDirectory };
 }
 
+test('idle status marks the session completed; busy and retry do not', async () => {
+  const f = await fixture(null, { events: [
+    { type: 'session.status', data: { sessionID: 'busy', status: { type: 'busy' } } },
+    { type: 'session.status', data: { sessionID: 'retry', status: { type: 'retry' } } },
+    { type: 'session.status', data: { sessionID: 'done', status: { type: 'idle' } } },
+  ] });
+  try {
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const stops = f.calls.filter(call => call.hook_event_name === 'Stop');
+    assert.equal(stops.length, 1);
+    assert.equal(stops[0].session_id, 'done');
+  } finally { await f.cleanup(); }
+});
+
 for (const behavior of ['allow', 'deny']) {
   test(`explicit relay ${behavior} answers only the current ask`, async () => {
     const f = await fixture(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior } } }));

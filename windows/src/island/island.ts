@@ -87,6 +87,7 @@ export class Island {
   private wasInIsland = false;
   /** Last shape handed to Rust for the click-through test. */
   private pushedRect = { x: -1, y: -1, w: -1, h: -1 };
+  private drawnGeometry = { w: NaN, h: NaN, r: NaN };
 
   // Bot hover → love (IslandWindowController.botHoverIn)
   private botHovering = false;
@@ -673,16 +674,24 @@ export class Island {
     const w = this.width.value;
     const hh = this.height.value;
     const r = this.radius.value;
-    this.islandEl.style.width = `${w}px`;
-    this.islandEl.style.height = `${hh}px`;
-    this.islandEl.style.borderRadius = `0 0 ${r}px ${r}px`;
-    this.islandEl.style.transform = `translateX(-50%)`;
+    const previous = this.drawnGeometry;
+    if (previous.w !== w) {
+      this.islandEl.style.width = `${w}px`;
+      this.miniGrid.style.left = `${w - 40 - 14.5}px`;
+      this.greetingCanvas.style.left = `${(w - EXPANDED_W) / 2}px`;
+      this.uploadCanvas.el.style.left = `${(w - EXPANDED_W) / 2}px`;
+    }
+    if (previous.h !== hh) {
+      this.islandEl.style.height = `${hh}px`;
+      this.miniGrid.style.top = `${hh / 2 - 14.5}px`;
+    }
+    if (previous.r !== r) this.islandEl.style.borderRadius = `0 0 ${r}px ${r}px`;
+    if (Number.isNaN(previous.w)) this.islandEl.style.transform = `translateX(-50%)`;
+    previous.w = w;
+    previous.h = hh;
+    previous.r = r;
     // These follow the island as it resizes, so they belong here rather than in
     // the state-driven DOM sync.
-    this.miniGrid.style.left = `${w - 40 - 14.5}px`;
-    this.miniGrid.style.top = `${hh / 2 - 14.5}px`;
-    this.greetingCanvas.style.left = `${(w - EXPANDED_W) / 2}px`;
-    this.uploadCanvas.el.style.left = `${(w - EXPANDED_W) / 2}px`;
 
     const viewportW = window.innerWidth > 0 ? window.innerWidth : PANEL_W;
     const rect = { x: (viewportW - w) / 2, y: 0, w, h: hh };
