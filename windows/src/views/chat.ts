@@ -227,7 +227,11 @@ export function buildPrompt(onHeightChange: () => void): ViewHost {
   const body = h("div", { class: "chat-body" });
   const picker = buildPicker(() => {
     body.classList.toggle("picking", picker.isOpen);
+    const heightChanged = State.chatModelPickerOpen !== picker.isOpen;
+    State.chatModelPickerOpen = picker.isOpen;
+    modelBtn.setAttribute("aria-expanded", String(picker.isOpen));
     drawModelButton();
+    if (heightChanged) onHeightChange();
   });
   body.append(chipRow, log, picker.el, modelRow, bar);
 

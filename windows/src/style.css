@@ -1239,6 +1239,9 @@ input[type="range"]::-webkit-slider-thumb {
 
 .picker-chips {
   display: flex;
+  flex: 0 0 auto;
+  max-height: 80px;
+  overflow-y: auto;
   flex-wrap: wrap;
   gap: 6px;
 }
@@ -1283,6 +1286,8 @@ input[type="range"]::-webkit-slider-thumb {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1292,6 +1297,8 @@ input[type="range"]::-webkit-slider-thumb {
 
 .picker-model {
   display: flex;
+  flex-shrink: 0;
+  min-height: 36px;
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
@@ -1306,6 +1313,12 @@ input[type="range"]::-webkit-slider-thumb {
 
 .picker-model:hover {
   background: rgba(255, 255, 255, 0.05);
+}
+
+.picker-model:focus-visible,
+.picker-chip:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: -2px;
 }
 
 .picker-model.on {

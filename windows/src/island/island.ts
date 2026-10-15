@@ -644,7 +644,7 @@ export class Island {
   // ── Geometry ────────────────────────────────────────────────────────────────
 
   private targetSize(): { w: number; h: number; r: number } {
-    let { w, h } = islandSize(State.mode, State.view, State.chatHistory.length);
+    let { w, h } = islandSize(State.mode, State.view, State.chatHistory.length, State.chatModelPickerOpen);
     if (State.mode === "expanded" && State.view === "question" && State.pendingApproval?.questions) {
       h = QUESTION_PICKER_H;
     }

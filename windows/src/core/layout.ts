@@ -103,14 +103,16 @@ export const VIEW_LAYOUTS: Record<IslandViewName, ViewLayout> = {
 export const QUESTION_PICKER_H = 200;
 
 /** Chat view grows with the conversation — IslandContainer.chatPromptHeight. */
-export function chatPromptHeight(messageCount: number): number {
-  return Math.min(300, 240 + messageCount * 40);
+export const CHAT_MODEL_PICKER_H = 440;
+export function chatPromptHeight(messageCount: number, modelPickerOpen = false): number {
+  return modelPickerOpen ? CHAT_MODEL_PICKER_H : Math.min(300, 240 + messageCount * 40);
 }
 
 export function islandSize(
   mode: IslandMode,
   view: IslandViewName,
   chatCount = 0,
+  modelPickerOpen = false,
 ): { w: number; h: number } {
   switch (mode) {
     case "hidden":
@@ -120,7 +122,7 @@ export function islandSize(
     case "compact":
       return { w: COMPACT_W, h: NOTCH_H };
     case "expanded": {
-      const h = view === "prompt" ? chatPromptHeight(chatCount) : VIEW_LAYOUTS[view].height;
+      const h = view === "prompt" ? chatPromptHeight(chatCount, modelPickerOpen) : VIEW_LAYOUTS[view].height;
       return { w: EXPANDED_W, h };
     }
   }

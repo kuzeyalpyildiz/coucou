@@ -28,6 +28,7 @@ beforeEach(() => {
   answers = {};
   State.settings = { ...DEFAULT_SETTINGS, chatModels: {} };
   State.chatHistory = [];
+  State.chatModelPickerOpen = false;
   State.stateOverride = null;
   State.view = "prompt";
   State.droppedFile = null;
@@ -47,6 +48,18 @@ test("the model button shows the active provider's model", () => {
   State.settings = { ...State.settings, chatProvider: "ollama" };
   view.sync();
   assert.equal($(".model-name").textContent, "Choose a model");
+});
+
+test("opening and closing the model picker requests a taller layout and restores chat height", async () => {
+  const changes = [];
+  view = buildPrompt(() => changes.push(State.chatModelPickerOpen));
+  view.sync();
+  $(".model-btn").fire("click");
+  await flush();
+  assert.equal(State.chatModelPickerOpen, true);
+  $(".model-btn").fire("click");
+  assert.equal(State.chatModelPickerOpen, false);
+  assert.deepEqual(changes, [true, false]);
 });
 
 test("a provider without a key is never asked for its models", async () => {
