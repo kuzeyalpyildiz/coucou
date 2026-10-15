@@ -985,12 +985,15 @@ mod tests {
 
     #[test]
     fn the_island_panel_is_home() {
-        // Island centred on a 1920 px display at 150 %.
-        let zone = home_zone(960.0, 0.0, 1.5);
-        assert!(zone.contains((960.0, 10.0)), "on the island");
-        assert!(zone.contains((960.0 - 359.0 * 1.5, 300.0 * 1.5)), "inside the panel");
-        assert!(!zone.contains((960.0, 330.0 * 1.5)), "below the panel");
-        assert!(!zone.contains((100.0, 10.0)), "top-left corner of the screen");
+        // Test the current panel boundary, not the previous fixed 320 px height.
+        for scale in [1.0, 1.25, 1.5, 2.0, 3.0] {
+            let zone = home_zone(960.0, 0.0, scale);
+            assert!(zone.contains((960.0, 10.0)), "on the island at {scale}");
+            assert!(zone.contains((960.0 - (HOME_ZONE_W / 2.0 - 1.0) * scale, (HOME_ZONE_H - 1.0) * scale)), "inside the panel at {scale}");
+            assert!(!zone.contains((960.0, HOME_ZONE_H * scale)), "bottom edge is outside at {scale}");
+            assert!(!zone.contains((960.0, (HOME_ZONE_H + 1.0) * scale)), "below the panel at {scale}");
+            assert!(!zone.contains((960.0 - (HOME_ZONE_W / 2.0 + 1.0) * scale, 10.0)), "left of the panel at {scale}");
+        }
     }
 
     #[test]
