@@ -41,6 +41,13 @@ android {
         }
     }
     buildTypes {
+        debug {
+            // Optional side-by-side QA build: never replace the user's paired app.
+            if (providers.gradleProperty("coucouTestInstall").orNull == "true") {
+                applicationIdSuffix = ".test"
+                versionNameSuffix = "-test"
+            }
+        }
         release {
             // Shrink, obfuscate and optimise with R8; unused resources go too. The rules (and why there are so few) are in proguard-rules.pro.
             isMinifyEnabled = true

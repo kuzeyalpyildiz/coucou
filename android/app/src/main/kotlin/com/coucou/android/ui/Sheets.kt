@@ -73,7 +73,7 @@ import kotlinx.coroutines.delay
  * panel itself never reach the scrim.
  */
 @Composable
-fun BottomSheetHost(onDismiss: () -> Unit, wash: Color? = null, content: @Composable ColumnScope.() -> Unit) {
+fun BottomSheetHost(onDismiss: () -> Unit, wash: Color? = null, dismissOnOutside: Boolean = true, content: @Composable ColumnScope.() -> Unit) {
     BackHandler(onBack = onDismiss)
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { shown = true }
@@ -81,7 +81,7 @@ fun BottomSheetHost(onDismiss: () -> Unit, wash: Color? = null, content: @Compos
     Box(Modifier.fillMaxSize()) {
         Box(
             Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f))
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = { if (dismissOnOutside) onDismiss() }),
         )
         AnimatedVisibility(
             visible = shown, modifier = Modifier.align(Alignment.BottomCenter),
@@ -190,7 +190,7 @@ fun QuestionSheet(model: AppModel, pillId: String, onDismiss: () -> Unit, onSend
     val dim = Color(IslandSurface.TEXT_DIM)
     val wash = MochiConst.STATES[BotState.QUESTION]?.color?.let(::rgbColor)
     val request = model.questionFor(pillId)
-    BottomSheetHost(onDismiss, wash) {
+    BottomSheetHost(onDismiss, wash, dismissOnOutside = request == null) {
         if (request == null) {
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                 SheetMochi(BotState.QUESTION, agentColour(model, pillId))

@@ -777,9 +777,10 @@ class AppModel(private val context: Context) : LinkListener {
      * picked is not logged, not stored and not put in the history.
      */
     fun answerQuestion(fingerprint: String, picks: List<List<String>>): Boolean {
-        val sent = link?.answer(fingerprint, picks) ?: false
-        if (sent) removeQuestion(fingerprint)
-        return sent
+        // A successful socket write is not a desktop acknowledgement. Keep the
+        // request until onApprovalResolved arrives (or its normal expiry).
+        if (questions.none { it.fingerprint == fingerprint }) return false
+        return link?.answer(fingerprint, picks) ?: false
     }
 
     // ── A file's change (cap `diffs`) ──────────────────────────────────────────────────

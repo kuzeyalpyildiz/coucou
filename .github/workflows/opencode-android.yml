@@ -1,0 +1,56 @@
+name: OpenCode Android question test build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [opencode-integration]
+    paths:
+      - 'android/**'
+      - '.github/workflows/opencode-android.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: opencode-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Check generated strings
+        run: node scripts/gen-strings.mjs --check
+      - name: Android unit tests
+        run: ./gradlew testDebugUnitTest -PcoucouTestInstall=true --console=plain
+      - name: Build side-by-side test APK
+        run: ./gradlew assembleDebug lintDebug -PcoucouTestInstall=true --console=plain
+      - name: Upload test APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: Coucou-Android-question-test-${{ github.sha }}
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 3
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: Coucou-Android-question-test-reports
+          path: android/app/build/reports
+          retention-days: 3

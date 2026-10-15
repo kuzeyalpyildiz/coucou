@@ -75,6 +75,7 @@ import com.coucou.android.app.CoucouApp
 import com.coucou.android.app.Mode
 import com.coucou.android.app.Notifications
 import com.coucou.android.core.ApprovalSheetPlan
+import com.coucou.android.core.QuestionSendGate
 import com.coucou.android.core.HomeText
 import com.coucou.android.core.Nav
 import com.coucou.android.core.Pills
@@ -142,6 +143,7 @@ class MainActivity : ComponentActivity() {
     private var closedApproval by mutableStateOf<String?>(null)
     private var questionPill by mutableStateOf<String?>(null)
     private var confirming = false
+    private val questionSendGate = QuestionSendGate()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -196,7 +198,7 @@ class MainActivity : ComponentActivity() {
                         // A request for permission rises over whatever is on screen until it is decided or closed.
                         val pending = ApprovalSheetPlan.next(model.approvals, closedApproval)
                         if (pending != null && screen != Screen.SCAN) ApprovalSheet(model, pending, onAllow = ::approve, onDismiss = { closedApproval = pending.fingerprint })
-                        questionPill?.let { QuestionSheet(model, it, onDismiss = { questionPill = null }, onSend = ::sendAnswer) }
+                        questionPill?.let { QuestionSheet(model, it, onDismiss = ::dismissQuestion, onSend = ::sendAnswer) }
                         DiffSheet(model)
                         // Pairing, chat, an approval and a question never show in screenshots or in the recent-apps card.
                         val secure = SecureScreens.needed(
@@ -282,17 +284,31 @@ class MainActivity : ComponentActivity() {
      * An answer to a question: only after the same screen-lock check as Allow. The lock prompt shows what is about to be
      * sent (the labels picked); nothing about it is logged or stored.
      */
+    private fun dismissQuestion() {
+        if (questionSendGate.cancel()) confirming = false
+        questionPill = null
+    }
+
     private fun sendAnswer(request: QuestionRequest, picks: List<List<String>>) {
         if (confirming) return
+        if (questionPill != request.pillId || model.questionFor(request.pillId)?.fingerprint != request.fingerprint) return
         confirming = true
+        val token = questionSendGate.begin(request.fingerprint)
         BiometricGate.confirm(
             this, getString(R.string.question_confirm_title), picks.joinToString("; ") { it.joinToString(", ") }, getString(R.string.msg_need_lock),
-            onSuccess = {
+            onSuccess = success@ {
+                val current = if (questionPill == request.pillId) model.questionFor(request.pillId)?.fingerprint else null
+                if (!questionSendGate.consume(token, request.fingerprint)) return@success
                 confirming = false
+                if (current != request.fingerprint) return@success
                 questionPill = null
                 model.message = getString(if (model.answerQuestion(request.fingerprint, picks)) R.string.question_sent else R.string.question_not_sent)
             },
-            onFail = { confirming = false; if (it.isNotBlank()) model.message = it },
+            onFail = failure@ {
+                if (!questionSendGate.consume(token, request.fingerprint)) return@failure
+                confirming = false
+                if (it.isNotBlank()) model.message = it
+            },
         )
     }
 

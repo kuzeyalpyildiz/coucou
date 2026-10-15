@@ -94,6 +94,19 @@ class SheetsTest {
         assertTrue(q.contains("ApprovalSheetPlan.GUARD_MS"))
         assertTrue(q.contains("enabled = armed && QuestionFlow.complete"))
     }
+
+    @Test fun pendingQuestionsIgnoreOutsideTapsAndDismissalCannotSubmit() {
+        assertTrue(sheets.contains("dismissOnOutside = request == null"))
+        assertTrue(main.contains("onDismiss = ::dismissQuestion"))
+        val dismiss = main.substringAfter("private fun dismissQuestion()").substringBefore("private fun sendAnswer")
+        assertTrue(dismiss.contains("questionSendGate.cancel()"))
+        assertFalse(dismiss.contains("answerQuestion"))
+        val send = main.substringAfter("private fun sendAnswer").substringBefore("/** Allow:")
+        assertTrue(send.indexOf("questionSendGate.consume") < send.indexOf("model.answerQuestion"))
+        assertTrue(send.contains("current != request.fingerprint"))
+        val answer = src("app/AppModel.kt").substringAfter("fun answerQuestion(").substringBefore("// ── A file's change")
+        assertFalse("a socket write must not mark the request resolved", answer.contains("removeQuestion("))
+    }
     // ── the file-change sheet ──────────────────────────────────────────────────────
 
     private val diffSheet get() = src("ui/DiffSheet.kt")

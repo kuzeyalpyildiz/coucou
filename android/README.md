@@ -18,6 +18,19 @@ Real screenshots from a Galaxy A12s. The pairing, chat and approval screens are 
 
 ## Build and test
 
+For a side-by-side question-flow QA APK, run
+`./gradlew testDebugUnitTest assembleDebug -PcoucouTestInstall=true`.
+This uses `com.coucou.android.test`, leaving the installed app and its pairing
+untouched. The test app needs its own pairing. The integration branch's
+**OpenCode Android question test build** workflow uploads this APK without a release.
+
+Question dismissal checks on a device: outside taps must not dismiss a pending
+question; Back/Later may close its sheet but must leave the request pending on
+the computer. Reopen it to answer. Dismissing during screen-lock confirmation
+must invalidate that callback. A sent answer stays pending until the desktop
+resolves it; a failed send must not remove it. These interaction checks still
+require a paired physical device; unit tests alone do not establish them.
+
 Needs JDK 17 and the Android SDK (platform 35). From this folder:
 
 ```bash
