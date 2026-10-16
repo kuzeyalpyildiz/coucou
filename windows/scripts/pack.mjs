@@ -5,6 +5,7 @@
 import { readFileSync, mkdirSync, copyFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const bundleRoot = join(root, "target", "release", "bundle");
@@ -27,7 +28,7 @@ const PACKAGES = {
     {
       dir: "msi",
       suffix: ".msi",
-      names: [`Coucou-Windows-${version}.msi`, "Coucou-Windows.msi", "coucou-latest.msi"],
+      names: [`Coucou-Windows-${version}.msi`, "Coucou-Windows.msi"],
     },
   ],
   linux: [
@@ -74,6 +75,13 @@ for (const { dir, suffix, names } of packages) {
     copyFileSync(built, dest);
     written.push(dest);
   }
+}
+
+if (process.platform === "win32") {
+  execFileSync("powershell.exe", ["-NoProfile", "-File", join(root, "scripts", "build-bootstrap.ps1")], { stdio: "inherit" });
+  const bootstrap = join(outDir, "coucou-latest.exe");
+  copyFileSync(join(root, "target", "release", "coucou-latest.exe"), bootstrap);
+  written.push(bootstrap);
 }
 
 console.log("\n  Packages ready\n");

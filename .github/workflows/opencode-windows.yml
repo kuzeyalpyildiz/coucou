@@ -61,14 +61,14 @@ jobs:
           $installers = @(Get-ChildItem -LiteralPath target/release/bundle/msi -Filter *.msi -File)
           if ($installers.Count -eq 0) { throw 'MSI installer was not produced' }
           $installers | Copy-Item -Destination target/release
-          # Stable rolling filename: always the latest candidate build.
-          $latest = $installers | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          Copy-Item -LiteralPath (Join-Path target/release $latest.Name) -Destination target/release/coucou-latest.msi -Force
+
+      - name: Build latest stable release downloader
+        run: ./scripts/build-bootstrap.ps1
 
       - name: Record artifact checksums
         run: |
           $ErrorActionPreference = 'Stop'
-          $paths = @('target/release/coucou.exe', 'target/release/coucou-hook.exe')
+          $paths = @('target/release/coucou.exe', 'target/release/coucou-hook.exe', 'target/release/coucou-latest.exe')
           $paths += @(Get-ChildItem -LiteralPath target/release -Filter *.msi -File | ForEach-Object { $_.FullName })
           $lines = foreach ($path in $paths) {
             $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $path
@@ -84,6 +84,7 @@ jobs:
           path: |
             windows/target/release/coucou.exe
             windows/target/release/coucou-hook.exe
+            windows/target/release/coucou-latest.exe
             windows/target/release/*.msi
             windows/target/release/SHA256SUMS.txt
             windows/target/release/BUILD-REF.txt
