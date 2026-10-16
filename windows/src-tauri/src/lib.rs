@@ -17,6 +17,7 @@ mod integrations;
 mod island;
 mod local_chat;
 mod log;
+mod memory;
 mod net;
 mod notes;
 mod openai_compat;
@@ -766,6 +767,7 @@ pub fn run() {
             status_line_preview,
             status_line_apply,
             codex_plan_usage,
+            memory::memory_profile,
             approval_decision,
             approval_answer,
             approval_ack,

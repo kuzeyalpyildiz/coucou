@@ -122,9 +122,15 @@ enum Mode {
 
 fn run(app: AppHandle, stop: Arc<AtomicBool>) {
     let mic = crate::flow::get(&app).map(|f| f.store.lock().unwrap().prefs.mic.clone()).unwrap_or_default();
-    let (tx, rx) = mpsc::channel::<Vec<f32>>();
+    // Bounded: an unbounded queue grows without limit when transcription lags
+    // behind the microphone (slow model, busy CPU). Drop stale chunks instead.
+    let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(4);
+    let mut dropped_chunks: u64 = 0;
     let capture = audio::Capture::start(audio::Source::Mic(if mic.is_empty() { None } else { Some(mic) }), move |s| {
-        let _ = tx.send(s.to_vec());
+        if tx.try_send(s.to_vec()).is_err() {
+            // Queue full: receiver is busy transcribing; this audio is stale.
+            // Dropping keeps memory bounded to ~4 chunks instead of growing.
+        }
     });
     let mut capture = match capture {
         Ok(c) => c,
@@ -138,9 +144,28 @@ fn run(app: AppHandle, stop: Arc<AtomicBool>) {
     let mut mode = Mode::Wake;
     let mut brain = brain::Brain::default();
     let mut hide_at: Option<Instant> = None;
+    let mut last_profile = Instant::now();
     while !stop.load(Ordering::Relaxed) {
+        // Periodic memory self-check: log working set + model state every 5 min
+        // while listening, so growth is visible in coucou.log without a debugger.
+        if last_profile.elapsed() > Duration::from_secs(300) {
+            last_profile = Instant::now();
+            crate::log::line(crate::memory::profile_line());
+        }
         let chunk = match rx.recv_timeout(Duration::from_millis(300)) {
-            Ok(c) => Some(c),
+            Ok(c) => {
+                // If transcription fell behind, skip stale queued audio: only
+                // the freshest chunk matters for wake-word latency and memory.
+                let mut fresh = c;
+                while let Ok(newer) = rx.try_recv() {
+                    dropped_chunks += 1;
+                    fresh = newer;
+                }
+                if dropped_chunks > 0 && dropped_chunks % 20 == 0 {
+                    crate::log::line(format!("voice: dropped {dropped_chunks} stale audio chunks (transcription lag)"));
+                }
+                Some(fresh)
+            }
             Err(mpsc::RecvTimeoutError::Timeout) => None,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };

@@ -327,6 +327,11 @@ pub fn unload() {
     *recognizer_slot().lock().unwrap() = None;
 }
 
+/// True when the Parakeet recognizer is currently resident in memory.
+pub fn is_loaded() -> bool {
+    recognizer_slot().lock().unwrap().is_some()
+}
+
 /// What was said, and each word with its place in the audio.
 #[derive(Debug, Clone, Default)]
 pub struct Transcript {

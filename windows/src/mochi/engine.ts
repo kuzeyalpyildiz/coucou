@@ -595,8 +595,10 @@ export class BotEngine {
     let tp = this.lookY * 0.5;
 
     if (this.cfg.look) {
-      ty = ty * 0.35 + this.cfg.look[0] * 0.55;
-      tp = tp * 0.3 + this.cfg.look[1] * 0.5;
+      // Keep the expression as a bias, not a one-quadrant lock: the pointer
+      // must be able to overcome it in both directions on each axis.
+      ty = ty * 0.8 + this.cfg.look[0] * 0.2;
+      tp = tp * 0.8 + this.cfg.look[1] * 0.2;
     }
     if (this.cfg.scans) {
       ty = Math.sin(t * 2.6) * 0.6;

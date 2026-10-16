@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { calls, emit, sent } from "./tauri.mjs";
 import { registerHookHandlers } from "../src/island/hooks.ts";
 import { DEFAULT_SETTINGS, State } from "../src/core/state.ts";
+import { linkSnapshot } from "../src/island/phone-link.ts";
 
 const CLAUDE = "integration_claude";
 
@@ -18,13 +19,13 @@ const island = {
   reveal: () => asked.push("reveal"),
   dropPin: () => asked.push("dropPin"),
 };
-registerHookHandlers(island);
+let disposeHooks;
 
 const hook = (payload) => emit("hook", payload);
 const task = (id = CLAUDE) => State.tasks.find((t) => t.id === id);
 const seconds = (n) => mock.timers.tick(n * 1000);
 
-beforeEach(() => {
+beforeEach(async () => {
   mock.timers.enable({ apis: ["setTimeout"] });
   asked = [];
   calls.length = 0;
@@ -35,17 +36,18 @@ beforeEach(() => {
   State.paused = false;
   State.isPinned = false;
   State.pendingApproval = null;
+  State.focusBeforeApproval = null;
+  State.stateOverride = null;
   State.settings = { ...DEFAULT_SETTINGS };
   State.loadIntegrationTasks();
+  disposeHooks = registerHookHandlers(island);
+  await Promise.resolve();
 });
 
-// hooks.ts keeps timer handles between events: the 110 s approval timeout, and
-// one 5.2 s return to idle per pill that has stopped. Letting every timer fire
-// before the reset clears them all; otherwise the next test would cancel a timer
-// that belongs to a mock clock that no longer exists.
-afterEach(() => {
-  mock.timers.runAll();
-  mock.timers.reset();
+// Dispose the real registration and timers between independent island lifetimes.
+afterEach(async () => {
+  try { await disposeHooks?.(); }
+  finally { mock.timers.reset(); }
 });
 
 // ── Paused ────────────────────────────────────────────────────────────────────
@@ -149,6 +151,142 @@ test("an unknown event changes nothing", () => {
 });
 
 // ── Stop ──────────────────────────────────────────────────────────────────────
+
+test("OpenCode completion recovers a missing pill after a desktop restart", () => {
+  hook({ hook_event_name: "Stop", coucou_agent: "opencode", session_id: "recovered", cwd: "C:\\projects\\demo" });
+  const completed = task("agent_opencode");
+  assert.ok(completed, "completion must not be discarded when the work-start event was missed");
+  assert.equal(completed.state, "finished");
+  assert.equal(completed.sessionId, "recovered");
+  assert.equal(completed.sessionCwd, "C:\\projects\\demo");
+  assert.deepEqual(asked, ["alert:finished"]);
+});
+
+test("duplicate native completion events produce only one finished notification", () => {
+  const completion = { hook_event_name: "Stop", coucou_agent: "opencode", session_id: "deduplicated", coucou_event_id: "evt-completed" };
+  hook(completion);
+  hook(completion);
+  assert.deepEqual(asked, ["alert:finished"]);
+  seconds(5.2);
+  assert.equal(task("agent_opencode"), undefined);
+});
+
+test("a late OpenCode tool-result relay cannot undo a completed task", () => {
+  const base = { coucou_agent: "opencode", session_id: "late-result" };
+  hook({ ...base, hook_event_name: "PreToolUse", tool_name: "Bash" });
+  hook({ ...base, hook_event_name: "Stop" });
+  hook({ ...base, hook_event_name: "PostToolUse", tool_name: "Bash" });
+  assert.equal(task("agent_opencode").state, "finished");
+  hook({ ...base, hook_event_name: "PostToolUseFailure", tool_name: "Bash" });
+  assert.equal(task("agent_opencode").state, "finished");
+});
+
+test("a completion expiry cannot delete a task that has already resumed", () => {
+  hook({ hook_event_name: "Stop", coucou_agent: "opencode", session_id: "resumed" });
+  State.updateTask("agent_opencode", "working");
+  seconds(5.2);
+  assert.equal(task("agent_opencode").state, "working");
+});
+
+test("replaying an old native completion cannot finish a newer turn", () => {
+  const base = { coucou_agent: "opencode", session_id: "replayed-session" };
+  const completion = { ...base, hook_event_name: "Stop", coucou_event_id: "evt-old-turn" };
+  hook(completion);
+  hook({ ...base, hook_event_name: "UserPromptSubmit" });
+  asked = [];
+  hook(completion);
+  assert.equal(task("agent_opencode").state, "thinking");
+  assert.deepEqual(asked, []);
+  seconds(5.2);
+  assert.equal(task("agent_opencode").state, "thinking");
+});
+
+test("concurrent OpenCode sessions keep independent state, steps, completion and timers", () => {
+  const first = { coucou_agent: "opencode", session_id: "parallel-first" };
+  const second = { coucou_agent: "opencode", session_id: "parallel-second" };
+  hook({ ...first, hook_event_name: "PreToolUse", tool_name: "Read" });
+  hook({ ...second, hook_event_name: "PreToolUse", tool_name: "Bash" });
+  const a = State.tasks.find((task) => task.sessionId === first.session_id);
+  const b = State.tasks.find((task) => task.sessionId === second.session_id);
+  assert.notEqual(a.id, b.id);
+  assert.deepEqual(a.steps, ["Reads"]);
+  assert.deepEqual(b.steps, ["Runs"]);
+  hook({ ...first, hook_event_name: "Stop" });
+  assert.equal(a.state, "finished");
+  assert.equal(b.state, "working");
+  const mobile = linkSnapshot().sessions;
+  assert.equal(mobile.find((session) => session.pillId === a.id).state, "finished");
+  assert.equal(mobile.find((session) => session.pillId === b.id).state, "working");
+  seconds(5.2);
+  assert.ok(State.tasks.includes(b));
+  assert.equal(b.state, "working");
+  hook({ ...first, hook_event_name: "SessionEnd" });
+  assert.ok(State.tasks.includes(b));
+});
+
+test("one OpenCode session cannot overwrite another session's question", () => {
+  const first = { coucou_agent: "opencode", session_id: "question-owner" };
+  hook({ ...first, hook_event_name: "PermissionRequest", request_id: "owned-question", tool_name: "AskUserQuestion", tool_input: {
+    questions: [{ question: "Continue?", options: [{ label: "Yes", description: "" }] }],
+  } });
+  const question = State.pendingApproval;
+  hook({ hook_event_name: "PreToolUse", coucou_agent: "opencode", session_id: "other-worker", tool_name: "Bash" });
+  assert.equal(State.pendingApproval, question);
+  assert.equal(task(question.pillId).state, "question");
+  hook({ hook_event_name: "Stop", coucou_agent: "opencode", session_id: "other-worker" });
+  assert.equal(task(question.pillId).state, "question");
+  assert.equal(State.pendingApproval, question);
+});
+
+test("OpenCode completion waits for an active question instead of expiring unseen", () => {
+  hook({ hook_event_name: "PermissionRequest", coucou_agent: "opencode", session_id: "attention-owner", request_id: "attention-question", tool_name: "AskUserQuestion", tool_input: {
+    questions: [{ question: "Choose?", options: [{ label: "Yes", description: "" }] }],
+  } });
+  hook({ hook_event_name: "Stop", coucou_agent: "opencode", session_id: "waiting-completion" });
+  const completed = State.tasks.find((task) => task.sessionId === "waiting-completion");
+  assert.equal(completed.pillBadge, "finished");
+  seconds(6);
+  assert.ok(State.tasks.includes(completed), "unseen completion must survive the presentation timeout");
+  assert.equal(State.pendingApproval.requestId, "attention-question");
+  State.mode = "compact";
+  asked = [];
+  hook({ hook_event_name: "CoucouRequestClosed", request_id: "attention-question" });
+  assert.equal(State.pendingApproval, null);
+  assert.equal(State.focusId, completed.id);
+  assert.equal(asked.at(-1), "alert:finished");
+  seconds(5.2);
+  assert.ok(!State.tasks.includes(completed), JSON.stringify(State.tasks.map(({ id, state, sessionId }) => ({ id, state, sessionId }))));
+  assert.equal(State.tasks.find((task) => task.sessionId === "attention-owner").state, "working");
+});
+
+test("background OpenCode completion waits until an expanded view gives attention back", () => {
+  State.mode = "expanded";
+  State.setFocus("integration_n8n");
+  hook({ hook_event_name: "Stop", coucou_agent: "opencode", session_id: "background-completion" });
+  const completed = State.tasks.find((task) => task.sessionId === "background-completion");
+  assert.deepEqual(asked, []);
+  seconds(6);
+  assert.equal(completed.state, "finished");
+  assert.ok(State.tasks.includes(completed));
+  State.mode = "compact";
+  State.notify();
+  assert.equal(State.focusId, completed.id);
+  assert.deepEqual(asked, ["alert:finished"]);
+});
+
+test("new work cancels an unseen completion instead of presenting a stale finished view", () => {
+  State.mode = "expanded";
+  State.setFocus("integration_n8n");
+  const base = { coucou_agent: "opencode", session_id: "queued-then-resumed" };
+  hook({ ...base, hook_event_name: "Stop" });
+  hook({ ...base, hook_event_name: "UserPromptSubmit" });
+  const current = State.tasks.find((task) => task.sessionId === base.session_id);
+  assert.equal(current.state, "thinking");
+  assert.equal(current.pillBadge, null);
+  State.mode = "compact";
+  State.notify();
+  assert.deepEqual(asked, []);
+});
 
 test("an expired relay withdraws its question even while paused", () => {
   hook({ hook_event_name: "PermissionRequest", request_id: "expired", session_id: "s1", tool_name: "AskUserQuestion", tool_input: { questions: [{ question: "Continue?", options: [{ label: "Yes", description: "" }] }] } });

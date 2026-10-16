@@ -61,6 +61,9 @@ jobs:
           $installers = @(Get-ChildItem -LiteralPath target/release/bundle/msi -Filter *.msi -File)
           if ($installers.Count -eq 0) { throw 'MSI installer was not produced' }
           $installers | Copy-Item -Destination target/release
+          # Stable rolling filename: always the latest candidate build.
+          $latest = $installers | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          Copy-Item -LiteralPath (Join-Path target/release $latest.Name) -Destination target/release/coucou-latest.msi -Force
 
       - name: Record artifact checksums
         run: |

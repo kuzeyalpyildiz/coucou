@@ -276,6 +276,11 @@ export const Bridge = {
    * is missing, not signed in or slow (15 s).
    */
   codexPlanUsage: () => call<unknown>("codex_plan_usage"),
+  /** Working-set size, model residency and voice state for Diagnostics. */
+  memoryProfile: () =>
+    call<{ workingSetMb: number; modelLoaded: boolean; voiceListening: boolean; audioQueueBound: number }>(
+      "memory_profile",
+    ),
 
   approvalDecision: (requestId: string, decision: "allow" | "deny") =>
     call<void>("approval_decision", { requestId, decision }),

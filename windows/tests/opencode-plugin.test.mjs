@@ -26,7 +26,7 @@ async function fixture(reply, options = {}) {
         calls.push(JSON.parse(data));
         queueMicrotask(() => {
           if (reply != null) child.stdout.emit('data', reply);
-          child.emit('close', 0);
+          child.emit('close', options.exitCode ?? 0);
         });
       };
       return child;
@@ -42,7 +42,7 @@ async function fixture(reply, options = {}) {
   await api.link(() => { throw new Error('Unexpected dependency'); });
   await api.evaluate();
   const module = new vm.SourceTextModule(source, { context, importModuleDynamically: async (specifier) => {
-    assert.ok(['@opencode/client', '@opencode/client/service'].includes(specifier));
+    assert.equal(specifier, '../coucou-sdk/client.mjs');
     if (options.missingClient) throw new Error('Package unavailable');
     return api;
   } });
@@ -59,6 +59,7 @@ async function fixture(reply, options = {}) {
     tool: { hook: hook('tool') },
     permission: { hook: hook('permission') },
     event: { subscribe: ({ signal }) => ({ async *[Symbol.asyncIterator]() {
+      if (options.streamError) throw new Error('private diagnostic must not be logged');
       for (const event of options.events || []) yield event;
       if (!signal.aborted) await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
     } }) },
@@ -85,13 +86,33 @@ test('the live V2 execution-success event completes a task, not an intermediate 
   const f = await fixture(null, { events: [
     { type: 'session.step.ended', data: { sessionID: 'one', finish: 'tool-calls' } },
     { type: 'session.step.ended', data: { sessionID: 'one', finish: 'stop' } },
-    { type: 'session.execution.succeeded', data: { sessionID: 'one' } },
+    { id: 'evt-success', type: 'session.execution.succeeded', data: { sessionID: 'one' } },
   ] });
   try {
     await new Promise(setImmediate);
     const stops = f.calls.filter(call => call.hook_event_name === 'Stop');
     assert.equal(stops.length, 1);
     assert.equal(stops[0].session_id, 'one');
+    assert.equal(stops[0].coucou_event_id, 'evt-success');
+  } finally { await f.cleanup(); }
+});
+
+test('a completion relay failure is visible without exposing request content', async () => {
+  const f = await fixture(null, { exitCode: 1, events: [
+    { id: 'evt-failed-delivery', type: 'session.execution.succeeded', data: { sessionID: 'one' } },
+  ] });
+  try {
+    await new Promise(setImmediate);
+    assert.ok(f.warnings.some((message) => message.includes('Native completion relay failed')));
+  } finally { await f.cleanup(); }
+});
+
+test('an event-stream failure is visible and cleanup cancels reconnection', async () => {
+  const f = await fixture(null, { streamError: true });
+  try {
+    await new Promise(setImmediate);
+    assert.ok(f.warnings.some((message) => message.includes('Event stream disconnected')));
+    assert.ok(!f.warnings.some((message) => message.includes('private diagnostic')));
   } finally { await f.cleanup(); }
 });
 

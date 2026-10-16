@@ -175,6 +175,10 @@ impl Vad {
         self.speech_frames = 0;
         self.silent_frames = 0;
         self.current.clear();
+        // Release a long segment's allocation instead of holding ~768 KB idle.
+        if self.current.capacity() > MAX_SEGMENT {
+            self.current.shrink_to_fit();
+        }
         self.preroll.clear();
         self.frame.clear();
     }

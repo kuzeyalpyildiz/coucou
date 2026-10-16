@@ -15,6 +15,7 @@ import type { Island } from "./island";
 import { parseClaudePlan, restorePlanUsage } from "../core/plan";
 import { setClaudePlanUsage, storedClaudePlanUsage } from "../views/usage";
 import { N_, t } from "../i18n/i18n";
+import { openCodePillId } from "./session-routing";
 
 const CLAUDE_ID = "integration_claude";
 const CURSOR_ID = "agent_cursor";
@@ -35,6 +36,12 @@ export function dropPendingCard(island: Island): void {
 
 /** The return to idle that Stop arms, per pill, so the next turn can cancel it. */
 const stopTimers = new Map<string, number>();
+// Global plugins can be loaded in multiple OpenCode locations. Preserve native
+// event identity across their relays instead of showing a completion per copy.
+const seenNativeEvents = new Set<string>();
+const MAX_SEEN_NATIVE_EVENTS = 512;
+const deferredCompletions = new Map<string, string>();
+let processingHooks = 0;
 
 function cancelStopTimer(id: string): boolean {
   const timer = stopTimers.get(id);
@@ -44,6 +51,21 @@ function cancelStopTimer(id: string): boolean {
   return true;
 }
 
+function expireCompletion(id: string, sessionId: string, external: boolean, checkSession: boolean) {
+  cancelStopTimer(id);
+  stopTimers.set(id, window.setTimeout(() => {
+    stopTimers.delete(id);
+    const current = State.tasks.find((task) => task.id === id);
+    if (!current || current.state !== "finished") return;
+    if (checkSession && (current.sessionId ?? "") !== sessionId) return;
+    if (external) State.removeTask(id);
+    else {
+      State.updateTask(id, "idle");
+      State.setPillBadge(id, null);
+    }
+  }, 5200));
+}
+
 /** Events after which a pending permission request of the same session is moot. */
 const TURN_OVER = new Set(["Stop", "StopFailure", "UserPromptSubmit", "SessionEnd", "Interrupt"]);
 
@@ -51,6 +73,7 @@ interface HookPayload {
   hook_event_name?: string;
   request_id?: string;
   coucou_source_id?: string;
+  coucou_event_id?: string;
   session_id?: string;
   cwd?: string;
   message?: string;
@@ -229,7 +252,43 @@ function recordDiff(agentId: string, payload: HookPayload) {
 export function registerHookHandlers(island: Island) {
   // The last plan numbers seen survive a restart, as on the Mac.
   State.planUsage ??= restorePlanUsage(storedClaudePlanUsage());
-  void onEvent<HookPayload>("hook", (payload) => handleHook(island, payload));
+  let draining = false;
+  let disposed = false;
+  const flushCompletions = () => {
+    if (disposed || draining || processingHooks || State.paused || State.pendingApproval || State.stateOverride || State.mode === "expanded") return;
+    if (State.focusId && stopTimers.has(State.focusId) && State.focusTask?.state === "finished") return;
+    draining = true;
+    try {
+      for (const [id, sessionId] of deferredCompletions) {
+        deferredCompletions.delete(id);
+        const task = State.tasks.find((task) => task.id === id);
+        if (!task || task.state !== "finished" || task.sessionId !== sessionId) continue;
+        State.setFocus(id);
+        expireCompletion(id, sessionId, true, true);
+        island.alert("finished");
+        void Bridge.log("opencode deferred completion presented");
+        break;
+      }
+    } finally { draining = false; }
+  };
+  const unsubscribe = State.subscribe(flushCompletions);
+  const registration = onEvent<HookPayload>("hook", (payload) => {
+    if (disposed) return;
+    processingHooks++;
+    try { handleHook(island, payload); }
+    finally { processingHooks--; flushCompletions(); }
+  });
+  return async () => {
+    disposed = true;
+    unsubscribe();
+    for (const id of stopTimers.keys()) cancelStopTimer(id);
+    if (pendingTimeout != null) window.clearTimeout(pendingTimeout);
+    pendingTimeout = null;
+    deferredCompletions.clear();
+    seenNativeEvents.clear();
+    const unlisten = await registration;
+    unlisten();
+  };
 }
 
 function handleHook(island: Island, payload: HookPayload) {
@@ -267,9 +326,29 @@ function handleHook(island: Island, payload: HookPayload) {
   // when it runs in Cursor's terminal (Mac #120), VS Code's otherwise.
   const validAgent = validateAgent(payload.coucou_agent);
   const workspaceId = payload.term_editor === "cursor" ? CURSOR_ID : CLAUDE_ID;
-  const agentId = validAgent ? `agent_${validAgent}` : workspaceId;
   const isExternalAgent = validAgent !== null;
   const sessionId = payload.session_id ?? "";
+  const agentId = validAgent === "opencode" ? openCodePillId(State.tasks, sessionId) :
+    validAgent ? `agent_${validAgent}` : workspaceId;
+  if (!agentId) {
+    if (payload.request_id) void Bridge.approvalDecline(payload.request_id);
+    void Bridge.log("opencode session display capacity reached; request remains available in OpenCode");
+    return;
+  }
+  if (validAgent === "opencode" && payload.coucou_event_id) {
+    const key = JSON.stringify([sessionId, name, payload.coucou_event_id]);
+    if (seenNativeEvents.has(key)) return;
+    seenNativeEvents.add(key);
+    if (seenNativeEvents.size > MAX_SEEN_NATIVE_EVENTS) {
+      seenNativeEvents.delete(seenNativeEvents.values().next().value!);
+    }
+  }
+  // Tool hooks use separate fire-and-forget relay processes. A delayed result
+  // can arrive after the native completion event; it does not start a new turn.
+  if (validAgent === "opencode" && (name === "PostToolUse" || name === "PostToolUseFailure")) {
+    const current = State.tasks.find((task) => task.id === agentId);
+    if (!current || (current.state === "finished" && current.sessionId === sessionId)) return;
+  }
 
   /** Alerts force the island open; work events only reveal the compact island. */
   const surface = (view: Parameters<Island["alert"]>[0], isAlert: boolean) => {
@@ -300,7 +379,9 @@ function handleHook(island: Island, payload: HookPayload) {
    * badge that timer was going to clear goes now.
    */
   const supersedeStop = () => {
-    if (cancelStopTimer(agentId)) State.setPillBadge(agentId, null);
+    deferredCompletions.delete(agentId);
+    const expired = cancelStopTimer(agentId);
+    if (expired || State.tasks.find((task) => task.id === agentId)?.pillBadge === "finished") State.setPillBadge(agentId, null);
   };
 
   // The turn that asked for a permission is over — answered in the terminal,
@@ -396,6 +477,7 @@ function handleHook(island: Island, payload: HookPayload) {
     }
 
     case "Stop": {
+      if (validAgent === "opencode") ensurePill();
       State.updateTask(agentId, "finished");
       // Claude Code puts the turn's answer in the Stop payload itself, so there is
       // no transcript to read (the relay does not even forward its path). Other
@@ -412,23 +494,26 @@ function handleHook(island: Island, payload: HookPayload) {
       // A collapsed notch may still have a service/older agent selected. That
       // must not suppress a new completion popup. Do not steal an expanded
       // view, a pending question, or the front just restored by closing one.
-      if (!State.pendingApproval && (focused || (!pending && State.mode !== "expanded"))) {
+      const showFinished = !State.pendingApproval && (focused || (!pending && State.mode !== "expanded"));
+      if (showFinished) {
         if (!focused) State.setFocus(agentId);
         surface("finished", true);
       } else State.setPillBadge(agentId, "finished");
+      if (validAgent === "opencode") {
+        void Bridge.log(`opencode completion ${JSON.stringify({
+          session: sessionId, event: payload.coucou_event_id ?? null,
+          presentation: showFinished ? "finished-view" : State.pendingApproval ? "badge:pending-question" : "badge:background-view",
+        })}`);
+      }
       cancelStopTimer(agentId);
-      stopTimers.set(
-        agentId,
-        window.setTimeout(() => {
-          stopTimers.delete(agentId);
-          if (isExternalAgent) {
-            State.removeTask(agentId);
-          } else {
-            State.updateTask(agentId, "idle");
-            State.setPillBadge(agentId, null);
-          }
-        }, 5200),
-      );
+      if (validAgent === "opencode" && !showFinished) {
+        // Never discard a completion while another view/question owns attention.
+        // Its existing badge remains until the finished view can be shown.
+        deferredCompletions.set(agentId, sessionId);
+      } else {
+        deferredCompletions.delete(agentId);
+        expireCompletion(agentId, sessionId, isExternalAgent, validAgent === "opencode");
+      }
       break;
     }
 
@@ -451,6 +536,7 @@ function handleHook(island: Island, payload: HookPayload) {
       // Nothing left for the timer to do, and it must not outlive the session: a
       // pill recreated within 5.2 s would be removed by it.
       cancelStopTimer(agentId);
+      deferredCompletions.delete(agentId);
       State.clearSessionDiffs(agentId);
       if (isExternalAgent) {
         State.removeTask(agentId);

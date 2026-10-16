@@ -27,7 +27,7 @@ import { IslandStateMachine } from "./fsm";
 import { refreshHookPills } from "./integrations";
 import { DesktopLink } from "./desktop";
 import type { ViewCommand } from "./shortcuts";
-import { DRAG_THRESHOLD } from "../mochi/desktop-logic";
+import { DRAG_THRESHOLD, gaze } from "../mochi/desktop-logic";
 
 const BOT_OVERHANG = 40;
 const CLAUDE_DESKTOP_ID = "agent_claude-desktop";
@@ -1084,8 +1084,10 @@ export class Island {
         ? hexToRGB(focus.color)
         : null;
     this.engine.particleOverhang = BOT_OVERHANG;
-    this.engine.lookX = this.lookX();
-    this.engine.lookY = this.lookY();
+    const rect = this.islandRect();
+    const look = gaze({ x: rect.x + this.botCx.value, y: rect.y + this.botCy.value }, State.mouse);
+    this.engine.lookX = look.lookX;
+    this.engine.lookY = look.lookY;
     if (this.engine.morph > 0.3) {
       this.engine.slotHTarget = State.fileDragOver ? 0.2 : 0;
     } else {
@@ -1121,17 +1123,6 @@ export class Island {
     this.engine.applyDance(ctx, w, hCss);
     this.engine.draw(ctx, w, hCss);
     ctx.restore();
-  }
-
-  /** BotCanvasView.lookX / lookY — tanh of the distance to the bot. */
-  private lookX(): number {
-    const rect = this.islandRect();
-    const botScreenX = rect.x + this.botCx.value;
-    return Math.tanh((State.mouse.x - botScreenX) / 260);
-  }
-
-  private lookY(): number {
-    return -Math.tanh((State.mouse.y - this.botCy.value) / 200);
   }
 
   private updateCountdown(nowMs: number) {

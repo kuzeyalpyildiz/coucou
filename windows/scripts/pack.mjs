@@ -27,7 +27,7 @@ const PACKAGES = {
     {
       dir: "msi",
       suffix: ".msi",
-      names: [`Coucou-Windows-${version}.msi`, "Coucou-Windows.msi"],
+      names: [`Coucou-Windows-${version}.msi`, "Coucou-Windows.msi", "coucou-latest.msi"],
     },
   ],
   linux: [
