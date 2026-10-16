@@ -150,6 +150,20 @@ test("an unknown event changes nothing", () => {
 
 // ── Stop ──────────────────────────────────────────────────────────────────────
 
+test("an expired relay withdraws its question even while paused", () => {
+  hook({ hook_event_name: "PermissionRequest", request_id: "expired", session_id: "s1", tool_name: "AskUserQuestion", tool_input: { questions: [{ question: "Continue?", options: [{ label: "Yes", description: "" }] }] } });
+  assert.equal(State.pendingApproval?.requestId, "expired");
+  State.paused = true;
+  hook({ hook_event_name: "CoucouRequestClosed", request_id: "expired" });
+  assert.equal(State.pendingApproval, null);
+});
+
+test("closing a duplicate relay does not withdraw the active question", () => {
+  hook({ hook_event_name: "PermissionRequest", request_id: "active", session_id: "s1", tool_name: "Bash" });
+  hook({ hook_event_name: "CoucouRequestClosed", request_id: "duplicate" });
+  assert.equal(State.pendingApproval?.requestId, "active");
+});
+
 test("a finished session opens the finished view, then goes idle after 5.2 s", () => {
   hook({ hook_event_name: "Stop", message: "done" });
   assert.equal(task().state, "finished");

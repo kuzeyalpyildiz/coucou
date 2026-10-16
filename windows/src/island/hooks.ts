@@ -233,6 +233,14 @@ export function registerHookHandlers(island: Island) {
 }
 
 function handleHook(island: Island, payload: HookPayload) {
+  if (payload.hook_event_name === "CoucouRequestClosed") {
+    if (payload.request_id && State.pendingApproval?.requestId === payload.request_id) {
+      if (pendingTimeout != null) window.clearTimeout(pendingTimeout);
+      pendingTimeout = null;
+      dropPendingCard(island);
+    }
+    return;
+  }
   // Account-wide numbers from the status line relay, not part of any session:
   // keep the latest, nothing else (no reveal, no sound), paused or not.
   if (payload.hook_event_name === "StatusLine") {
@@ -485,9 +493,6 @@ function handleHook(island: Island, payload: HookPayload) {
         if (requestId) void Bridge.approvalDecline(requestId);
         break;
       }
-      ensurePill();
-      supersedeStop();
-      if (pendingTimeout != null) window.clearTimeout(pendingTimeout);
       const tool = payload.tool_name ?? "Tool";
       const input = payload.tool_input ?? {};
       // Claude Code asking a question is not a permission to grant: the island
@@ -499,6 +504,12 @@ function handleHook(island: Island, payload: HookPayload) {
          break;
        }
       const view = questions ? "question" : "approval";
+      // Acknowledge before state notifications synchronously render the card.
+      // Rendering a cold WebView must not exhaust the relay's short wait.
+      if (requestId) void Bridge.approvalAck(requestId);
+      ensurePill();
+      supersedeStop();
+      if (pendingTimeout != null) window.clearTimeout(pendingTimeout);
       // The card always comes up, even over another pill or an island that is
       // already open: its pill comes to the front, and the one you were on
       // comes back once you answer (Mac #117, #120).
@@ -511,15 +522,13 @@ function handleHook(island: Island, payload: HookPayload) {
          ...(questions ? { questions } : {}),
          ...(validAgent === "opencode" && payload.coucou_source_id ? { sourceId: payload.coucou_source_id } : {}),
       });
-      // The relay's short ack window closes in 800 ms; everything below this
-      // line is synchronous, so the card really is up by the time it lands.
-      if (requestId) void Bridge.approvalAck(requestId);
       State.updateTask(agentId, view);
       Sound.play(view);
       // Any agent's card (Claude Code, Codex, Copilot CLI, Muse Code) comes up
       // the same way: beginApproval brought its pill to the front.
       island.alert(view);
-      // Coucou answers within 108 s or not at all; after that the terminal has
+      // The native relay closes the card when its wait expires; this timer is
+      // a final fallback if that event cannot reach the WebView. The terminal has
       // taken over and the card would be lying.
       pendingTimeout = window.setTimeout(() => {
         pendingTimeout = null;

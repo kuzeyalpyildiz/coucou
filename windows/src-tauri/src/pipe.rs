@@ -36,14 +36,23 @@ use crate::island::WINDOW_LABEL;
 use crate::log;
 use crate::session_window;
 
-/// Slightly under coucou-hook's own 110 s wait, so we always answer first.
-const DECISION_TIMEOUT: Duration = Duration::from_secs(108);
+/// ACK + decision stays below coucou-hook's own 110 s wait.
+const DECISION_TIMEOUT: Duration = Duration::from_secs(106);
 /// How long the island gets to say "the card is up". This is the whole of B4:
 /// without it, an island that is paused, hidden behind a crashed webview or
 /// simply not listening would leave Claude Code staring at a prompt nobody can
 /// see for nearly two minutes.
-const ACK_TIMEOUT: Duration = Duration::from_millis(800);
+const ACK_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_PAYLOAD: usize = 1 << 20;
+
+#[cfg(test)]
+mod timeout_tests {
+    #[test]
+    fn acknowledgment_allows_a_cold_webview_without_outliving_the_hook() {
+        assert!(super::ACK_TIMEOUT >= std::time::Duration::from_secs(3));
+        assert!(super::ACK_TIMEOUT + super::DECISION_TIMEOUT < std::time::Duration::from_secs(110));
+    }
+}
 
 /// What the island can say about a permission request.
 pub enum Reply {
@@ -239,6 +248,11 @@ async fn handle(app: AppHandle, mut pipe: impl Relay) {
 
     let decision = wait_for_decision(&id, &mut rx).await;
     app.state::<Pending>().0.lock().unwrap().remove(&id);
+    // A timed-out/declined request must not remain answerable on the island
+    // or phone after its relay has already returned to the terminal.
+    let _ = app.emit_to(WINDOW_LABEL, "hook", json!({
+        "hook_event_name": "CoucouRequestClosed", "request_id": id
+    }));
 
     // No decision: say nothing at all. coucou-hook then writes nothing to stdout
     // and Claude Code asks in the terminal, exactly as if Coucou were closed.
