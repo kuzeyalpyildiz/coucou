@@ -37,23 +37,48 @@ pub(super) fn system_target(wanted: &str) -> Option<&'static str> {
 }
 
 #[cfg(any(windows, test))]
+fn joined_words(text: &str) -> String {
+    text.split_whitespace().collect()
+}
+
+/// Match full words or their initials without a product-specific alias table.
+/// Require at least two abbreviated words, so a single short prefix is not
+/// treated as a guess. States are bounded by the requested name's length.
+#[cfg(any(windows, test))]
+fn abbreviated_name(wanted: &str, label: &str) -> bool {
+    let mut states = std::collections::HashSet::from([(0usize, 0u8)]);
+    for word in label.split_whitespace() {
+        let initial = &word[..word.chars().next().unwrap().len_utf8()];
+        let mut next = std::collections::HashSet::new();
+        for (offset, count) in states {
+            let rest = &wanted[offset..];
+            if rest.starts_with(word) { next.insert((offset + word.len(), count)); }
+            if word.len() > initial.len() && rest.starts_with(initial) {
+                next.insert((offset + initial.len(), (count + 1).min(2)));
+            }
+        }
+        if next.is_empty() { return false; }
+        states = next;
+    }
+    states.contains(&(wanted.len(), 2))
+}
+
+#[cfg(any(windows, test))]
 fn score(wanted: &str, label: &str) -> Option<u8> {
     let label = normalize(label);
     if label == wanted { return Some(0); }
-    // Small, explicit aliases; no spelling guesses or AI model requests.
-    let alias = match wanted {
-        "vs code" | "vscode" => "visual studio code",
-        "google chrome" => "chrome",
-        _ => wanted,
-    };
-    if label == alias { return Some(1); }
+    let joined = joined_words(wanted);
+    if !joined.is_empty() && joined_words(&label) == joined { return Some(1); }
     // Never confuse a requested app with its updater/uninstaller/help entry.
     if label.split_whitespace().any(|word| matches!(word,
         "uninstall" | "uninstaller" | "updater" | "installer" | "setup" | "repair" | "help")) {
         return None;
     }
-    if label.starts_with(&format!("{alias} ")) || label.ends_with(&format!(" {alias}")) {
+    if !joined.is_empty() && abbreviated_name(&joined, &label) {
         return Some(2);
+    }
+    if label.starts_with(&format!("{wanted} ")) || label.ends_with(&format!(" {wanted}")) {
+        return Some(3);
     }
     None
 }
@@ -62,12 +87,14 @@ fn score(wanted: &str, label: &str) -> Option<u8> {
 /// not create ambiguity; different products/editions must not be guessed away.
 #[cfg(any(windows, test))]
 pub(super) fn matches(wanted: &str, apps: &[AppName]) -> Vec<usize> {
+    let wanted = normalize(wanted);
+    if wanted.is_empty() { return Vec::new(); }
     let mut best = u8::MAX;
     let mut found = Vec::new();
     let mut identities = std::collections::HashSet::new();
     for (index, app) in apps.iter().enumerate() {
         if app.identity.is_empty() { continue; }
-        let Some(rank) = score(wanted, &app.label) else { continue };
+        let Some(rank) = score(&wanted, &app.label) else { continue };
         if rank > best { continue; }
         if rank < best {
             best = rank;
@@ -133,7 +160,7 @@ mod tests {
         assert!(matches("chrome and delete files", &apps).is_empty());
     }
     #[test]
-    fn exact_match_beats_aliases_and_aliases_are_explicit() {
+    fn abbreviations_are_derived_from_the_catalog_and_exact_names_win() {
         let apps = [app("Visual Studio Code", "code"), app("Visual Studio", "vs")];
         assert_eq!(matches("vs code", &apps), vec![0]);
         assert_eq!(matches("visual studio", &apps), vec![1]);
@@ -147,6 +174,105 @@ mod tests {
         assert_eq!(system_target("settings"), Some("ms-settings:"));
         for name in ["notepad.exe", "notepad file.txt", "cmd /c anything", "https://example.com", "c windows notepad exe"] {
             assert_eq!(system_target(name), None);
+        }
+    }
+
+    #[test]
+    fn spoken_compound_names_match_registered_apps_generically() {
+        let apps = [app("ChatGPT", "chatgpt"), app("OpenCode", "opencode"), app("Code", "code")];
+        for spoken in ["chat gpt", "chat g p t", "chatgpt"] {
+            assert_eq!(matches(spoken, &apps), vec![0]);
+        }
+        assert_eq!(matches("open code", &apps), vec![1]);
+        assert_eq!(matches("opencode", &apps), vec![1]);
+        assert_eq!(matches("code", &apps), vec![2]);
+        assert!(matches("chat gpt and open code", &apps).is_empty());
+        assert_eq!(matches("some app", &[app("SomeApp", "other")]), vec![0]);
+        assert_eq!(app_name("Open Chat GPT."), Some("chat gpt".into()));
+        assert_eq!(app_name("Open Open Code."), Some("open code".into()));
+    }
+
+    #[test]
+    fn literal_compound_name_match_still_beats_a_spoken_alias() {
+        let apps = [app("OpenCode", "opencode"), app("Open Code", "different")];
+        assert_eq!(matches("open code", &apps), vec![1]);
+        let duplicates = [app("ChatGPT", "first"), app("ChatGPT", "second")];
+        assert_eq!(matches("chat gpt", &duplicates), vec![0, 1]);
+    }
+
+    #[test]
+    fn unknown_product_names_support_arbitrary_word_boundaries_and_initials() {
+        for (spoken, label) in [
+            ("nebula note", "NebulaNote"), ("neb ulan ote", "NebulaNote"),
+            ("nebulanote", "Nebula Note"), ("x y z studio", "XYZStudio"),
+            ("n p studio", "Nebula Paper Studio"), ("nps", "Nebula Paper Studio"),
+            ("é p studio", "Étoile Paper Studio"),
+        ] { assert_eq!(matches(spoken, &[app(label, "app")]), vec![0], "{spoken} -> {label}"); }
+    }
+
+    #[test]
+    fn generic_matching_does_not_guess_collisions_or_maintenance_entries() {
+        let apps = [app("NebulaNote", "first"), app("Nebula Note", "second")];
+        assert_eq!(matches("nebu la note", &apps), vec![0, 1]);
+        assert_eq!(matches("nebula note", &apps), vec![1]);
+        assert!(matches("nebula note", &[app("NebulaNote Updater", "update")]).is_empty());
+        assert!(matches("n n updater", &[app("Nebula Note Updater", "update")]).is_empty());
+        assert!(matches("nebula note and delete files", &apps).is_empty());
+        assert!(matches("n", &[app("Nebula", "app")]).is_empty());
+        assert!(matches("", &apps).is_empty());
+    }
+
+    #[test]
+    fn every_word_partition_of_sample_names_matches_without_a_product_table() {
+        for label in ["NebulaNote", "XYZStudio", "Orbit360", "ÉtoilePad", "工具箱"] {
+            let letters: Vec<char> = label.chars().collect();
+            let apps = [app(label, "target"), app("Unrelated Editor", "other")];
+            for breaks in 0..(1usize << (letters.len() - 1)) {
+                let mut spoken = String::new();
+                for (i, letter) in letters.iter().enumerate() {
+                    if i > 0 && breaks & (1 << (i - 1)) != 0 { spoken.push(' '); }
+                    spoken.push(*letter);
+                }
+                assert_eq!(matches(&spoken, &apps), vec![0], "{spoken} -> {label}");
+            }
+        }
+    }
+
+    #[test]
+    fn matching_priority_and_collisions_do_not_depend_on_catalog_order() {
+        let entries = [app("NebulaNote", "joined"), app("Nebula Note", "spaced"), app("Nebula Note Pro", "pro")];
+        for order in [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
+            let apps: Vec<_> = order.iter().map(|i| entries[*i].clone()).collect();
+            for (spoken, expected) in [("nebula note", "spaced"), ("nebulanote", "joined")] {
+                let found = matches(spoken, &apps);
+                assert_eq!(found.len(), 1);
+                assert_eq!(apps[found[0]].identity, expected);
+            }
+            let found = matches("nebu la note", &apps);
+            let identities: std::collections::HashSet<_> = found.iter().map(|i| apps[*i].identity.as_str()).collect();
+            assert_eq!(identities, std::collections::HashSet::from(["joined", "spaced"]));
+        }
+    }
+
+    #[test]
+    fn generated_abbreviations_preserve_ambiguity_and_identity_deduplication() {
+        let apps = [app("Nebula Paper Studio", "one"), app("North Pixel Studio", "two")];
+        assert_eq!(matches("n p studio", &apps), vec![0, 1]);
+        let duplicates = [app("Nebula Paper Studio", "Same.App"), app("Nebula Paper Studio", "same.app")];
+        assert_eq!(matches("nps", &duplicates), vec![0]);
+        assert!(matches("n p s", &[app("Nebula Paper Studio Updater", "update")]).is_empty());
+        assert!(matches("nps", &[app("Nebula Paper Studio", "")]).is_empty());
+    }
+
+    #[test]
+    fn spacing_does_not_turn_extra_commands_paths_or_typos_into_app_matches() {
+        let apps = [app("NebulaNote", "target")];
+        for spoken in ["nebula", "nebula notes", "nebulx note", "nebula note and chrome",
+            "nebula note delete files", "c tools nebula note exe", "https nebula note com", "   "] {
+            assert!(matches(spoken, &apps).is_empty(), "{spoken}");
+        }
+        for spoken in ["  NEBULA    NOTE  ", "Nebula-Note", "n e b u l a n o t e"] {
+            assert_eq!(matches(spoken, &apps), vec![0], "{spoken}");
         }
     }
 }

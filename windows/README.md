@@ -154,8 +154,11 @@ catalog supplies desktop and packaged apps; the selected Shell item is activated
 directly through its PIDL, not a spoken path or Explorer command line. Fixed
 system-app aliases cover Notepad, Calculator, Paint, File Explorer, Task Manager,
 Command Prompt and Settings even without shortcuts (optional apps must already
-be installed). Duplicate canonical app identities are merged. Exact names take
-priority over aliases and partial names; genuinely different matches open
+be installed). App-name matching is catalog-driven: word-spacing differences
+and abbreviations derived from the installed name do not need per-app aliases.
+Exact names take priority over spacing-equivalent names, then derived
+abbreviations, then partial names. Duplicate canonical app identities are merged;
+genuinely different best matches open
 nothing and ask for a more specific name. No automatic spelling guesses or
 arbitrary spoken paths, URLs, arguments or shell commands are executed. App
 discovery only runs on an explicit command, with a bounded catalog scan and
