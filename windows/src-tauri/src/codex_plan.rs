@@ -56,7 +56,10 @@ pub fn read() -> Option<Value> {
     }
     let _busy = NotBusy;
 
-    let exe = platform::codex_candidates().into_iter().next()?;
+    let Some(exe) = platform::codex_candidates().into_iter().next() else {
+        crate::log::line("codex plan: CLI not found");
+        return None;
+    };
     let mut cmd = Command::new(&exe);
     cmd.arg("app-server").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
     // An npm install is a `#!/usr/bin/env node` script (or a .cmd calling node):
@@ -71,7 +74,14 @@ pub fn read() -> Option<Value> {
         }
     }
     platform::no_console(&mut cmd);
-    let mut child = cmd.spawn().ok()?;
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            // No paths, account data, or CLI output in the diagnostic log.
+            crate::log::line(format!("codex plan: CLI could not start ({:?})", error.kind()));
+            return None;
+        }
+    };
 
     let answer = (|| {
         let mut stdin = child.stdin.take()?;
@@ -98,6 +108,9 @@ pub fn read() -> Option<Value> {
     }
     let _ = child.kill();
     let _ = child.wait();
+    if answer.is_none() {
+        crate::log::line("codex plan: no rate-limit response (timeout, closed stream, or API error)");
+    }
     answer.map(|result| limits_only(&result))
 }
 

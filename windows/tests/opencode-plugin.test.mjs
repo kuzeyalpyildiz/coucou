@@ -13,7 +13,7 @@ async function fixture(reply, options = {}) {
   const disposed = [];
   const formReplies = [];
   const warnings = [];
-  const context = vm.createContext({ setTimeout, clearTimeout, AbortController, AbortSignal,
+  const context = vm.createContext({ setTimeout, clearTimeout, AbortController, AbortSignal, TextEncoder,
     process: { platform: 'win32' }, console: { warn: (message) => warnings.push(message) } });
   const transport = new vm.SyntheticModule(['spawn'], function () {
     this.setExport('spawn', () => {
@@ -217,6 +217,39 @@ test('events for another location do not show a question card', async () => {
   try {
     await new Promise(setImmediate);
     assert.equal(f.calls.length, 0);
+  } finally { await f.cleanup(); }
+});
+
+test('ordinary multi-question forms over 1800 characters reach the relay and return answers', async () => {
+  const fields = Array.from({ length: 3 }, (_, i) => ({
+    key: `q${i}`, type: 'string', description: `Question ${i}: ${'text '.repeat(50)}`,
+    options: Array.from({ length: 4 }, (_, j) => ({ label: `Choice ${j}`, value: `value${j}`, description: 'Details '.repeat(20) })),
+  }));
+  const form = { id: 'frm_long', sessionID: 'ses_one', fields };
+  const answers = Object.fromEntries(fields.map((field) => [field.description, 'Choice 1']));
+  const response = JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: {
+    behavior: 'allow', updatedInput: { answers },
+  } } });
+  const f = await fixture(response, { form, events: [
+    { type: 'form.created', location: { directory: '/plugin' }, data: { form } },
+  ] });
+  try {
+    await new Promise(setImmediate);
+    const request = f.calls.find((call) => call.hook_event_name === 'PermissionRequest');
+    assert.ok(request, 'the full form must reach the desktop instead of silently staying native');
+    assert.ok(JSON.stringify(request.tool_input).length > 1800);
+    assert.deepEqual(request.tool_input.questions.map((q) => q.question), fields.map((field) => field.description));
+    assert.equal(f.formReplies.length, 1);
+    assert.deepEqual(JSON.parse(JSON.stringify(f.formReplies[0].answer)), { q0: 'value1', q1: 'value1', q2: 'value1' });
+  } finally { await f.cleanup(); }
+});
+
+test('question fields obey relay byte limits without truncating answer keys or labels', async () => {
+  const f = await fixture(null);
+  try {
+    assert.ok(f.questionForm({ fields: [{ key: 'x', type: 'string', description: 'é'.repeat(1000) }] }));
+    assert.equal(f.questionForm({ fields: [{ key: 'x', type: 'string', description: 'é'.repeat(1001) }] }), null);
+    assert.equal(f.questionForm({ fields: [{ key: 'x', type: 'string', options: [{ label: '界'.repeat(667), value: 'x' }] }] }), null);
   } finally { await f.cleanup(); }
 });
 

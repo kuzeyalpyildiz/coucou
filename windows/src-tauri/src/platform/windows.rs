@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::os::windows::io::RawHandle;
 use std::os::windows::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tauri::{AppHandle, Manager, WebviewWindow};
@@ -151,6 +151,7 @@ pub fn codex_candidates() -> Vec<PathBuf> {
         out.push(appdata.join("npm").join("codex.cmd"));
     }
     if let Some(local) = var("LOCALAPPDATA") {
+        out.push(codex_desktop_cli(&local));
         out.push(local.join("Volta").join("bin").join("codex.exe"));
         out.push(local.join("pnpm").join("codex.cmd"));
     }
@@ -160,6 +161,19 @@ pub fn codex_candidates() -> Vec<PathBuf> {
     }
     out.retain(|p| p.is_file());
     out
+}
+
+fn codex_desktop_cli(local: &Path) -> PathBuf {
+    local.join("Programs").join("OpenAI").join("Codex").join("bin").join("codex.exe")
+}
+
+#[cfg(test)]
+mod codex_discovery_tests {
+    #[test]
+    fn desktop_install_is_discovered_without_an_updated_path() {
+        let local = std::path::Path::new(r"C:\Users\Test\AppData\Local");
+        assert_eq!(super::codex_desktop_cli(local), local.join(r"Programs\OpenAI\Codex\bin\codex.exe"));
+    }
 }
 
 // ── Who we are ────────────────────────────────────────────────────────────────
