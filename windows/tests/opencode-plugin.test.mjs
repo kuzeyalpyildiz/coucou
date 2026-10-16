@@ -81,6 +81,20 @@ test('idle status marks the session completed; busy and retry do not', async () 
   } finally { await f.cleanup(); }
 });
 
+test('the live V2 execution-success event completes a task, not an intermediate model step', async () => {
+  const f = await fixture(null, { events: [
+    { type: 'session.step.ended', data: { sessionID: 'one', finish: 'tool-calls' } },
+    { type: 'session.step.ended', data: { sessionID: 'one', finish: 'stop' } },
+    { type: 'session.execution.succeeded', data: { sessionID: 'one' } },
+  ] });
+  try {
+    await new Promise(setImmediate);
+    const stops = f.calls.filter(call => call.hook_event_name === 'Stop');
+    assert.equal(stops.length, 1);
+    assert.equal(stops[0].session_id, 'one');
+  } finally { await f.cleanup(); }
+});
+
 for (const behavior of ['allow', 'deny']) {
   test(`explicit relay ${behavior} answers only the current ask`, async () => {
     const f = await fixture(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior } } }));

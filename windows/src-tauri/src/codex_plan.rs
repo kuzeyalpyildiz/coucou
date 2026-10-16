@@ -10,9 +10,10 @@
 use std::cmp::Ordering;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Stdio};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{self, AtomicBool};
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -56,11 +57,26 @@ pub fn read() -> Option<Value> {
     }
     let _busy = NotBusy;
 
-    let Some(exe) = platform::codex_candidates().into_iter().next() else {
-        crate::log::line("codex plan: CLI not found");
-        return None;
-    };
-    let mut cmd = Command::new(&exe);
+    let candidates = platform::codex_candidates();
+    let answer = try_candidates(&candidates, TIMEOUT, read_from);
+    if answer.is_none() {
+        crate::log::line("codex plan: no usable CLI rate-limit response within discovery budget");
+    }
+    answer.map(|result| limits_only(&result))
+}
+
+fn try_candidates(candidates: &[PathBuf], budget: Duration, mut read: impl FnMut(&Path, Duration) -> Option<Value>) -> Option<Value> {
+    let started = Instant::now();
+    for exe in candidates {
+        let remaining = budget.checked_sub(started.elapsed())?;
+        if remaining.is_zero() { return None; }
+        if let Some(answer) = read(exe, remaining) { return Some(answer); }
+    }
+    None
+}
+
+fn read_from(exe: &Path, timeout: Duration) -> Option<Value> {
+    let mut cmd = Command::new(exe);
     cmd.arg("app-server").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
     // An npm install is a `#!/usr/bin/env node` script (or a .cmd calling node):
     // its own folder first on PATH, as the Mac does, so it finds its Node.
@@ -92,7 +108,7 @@ pub fn read() -> Option<Value> {
         });
         stdin.write_all(REQUESTS.as_bytes()).ok()?;
         stdin.flush().ok()?;
-        let answer = rx.recv_timeout(TIMEOUT).ok().flatten();
+        let answer = rx.recv_timeout(timeout).ok().flatten();
         // Closing its input is how app-server learns we are done.
         drop(stdin);
         answer
@@ -111,7 +127,7 @@ pub fn read() -> Option<Value> {
     if answer.is_none() {
         crate::log::line("codex plan: no rate-limit response (timeout, closed stream, or API error)");
     }
-    answer.map(|result| limits_only(&result))
+    answer
 }
 
 /// Reads JSON-RPC lines until the answer to request 2 and returns its `result`.
@@ -184,6 +200,25 @@ pub fn compare_versions(a: &str, b: &str) -> Ordering {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_broken_first_cli_does_not_hide_a_working_installation() {
+        let candidates = vec![PathBuf::from("stale-shim"), PathBuf::from("desktop-cli")];
+        let mut attempts = Vec::new();
+        let answer = try_candidates(&candidates, TIMEOUT, |exe, remaining| {
+            assert!(remaining <= TIMEOUT);
+            attempts.push(exe.to_path_buf());
+            (exe == Path::new("desktop-cli")).then(|| json!({"rateLimits": {"planType": "plus"}}))
+        });
+        assert_eq!(attempts, candidates);
+        assert_eq!(answer.unwrap()["rateLimits"]["planType"], "plus");
+    }
+
+    #[test]
+    fn exhausted_discovery_budget_does_not_start_a_cli() {
+        let candidates = vec![PathBuf::from("cli")];
+        assert!(try_candidates(&candidates, Duration::ZERO, |_, _| panic!("budget exhausted")).is_none());
+    }
 
     #[test]
     fn the_answer_to_the_question_is_picked_out_of_the_conversation() {

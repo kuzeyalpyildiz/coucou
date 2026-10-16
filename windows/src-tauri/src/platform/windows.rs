@@ -159,7 +159,11 @@ pub fn codex_candidates() -> Vec<PathBuf> {
         out.push(home.join(".bun").join("bin").join("codex.exe"));
         out.push(home.join(".local").join("bin").join("codex.exe"));
     }
-    out.retain(|p| p.is_file());
+    // Launch attempts, not metadata probes, determine whether a CLI is usable.
+    // Keep fixed candidates even if a filesystem probe fails, and let the
+    // caller try the next one when an old shim cannot start.
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|p| seen.insert(p.clone()));
     out
 }
 
