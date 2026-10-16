@@ -126,6 +126,9 @@ fn run(app: AppHandle, stop: Arc<AtomicBool>) {
     // behind the microphone (slow model, busy CPU). Drop stale chunks instead.
     let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(4);
     let mut dropped_chunks: u64 = 0;
+    // Last drop count we logged, so the warning fires once per 20 dropped
+    // chunks instead of on every received chunk once a multiple is reached.
+    let mut dropped_logged: u64 = 0;
     let capture = audio::Capture::start(audio::Source::Mic(if mic.is_empty() { None } else { Some(mic) }), move |s| {
         if tx.try_send(s.to_vec()).is_err() {
             // Queue full: receiver is busy transcribing; this audio is stale.
@@ -161,7 +164,8 @@ fn run(app: AppHandle, stop: Arc<AtomicBool>) {
                     dropped_chunks += 1;
                     fresh = newer;
                 }
-                if dropped_chunks > 0 && dropped_chunks % 20 == 0 {
+                if dropped_chunks - dropped_logged >= 20 {
+                    dropped_logged = dropped_chunks;
                     crate::log::line(format!("voice: dropped {dropped_chunks} stale audio chunks (transcription lag)"));
                 }
                 Some(fresh)

@@ -914,6 +914,21 @@ pub fn run() {
             island::spawn_cursor_poll(handle.clone(), gate.clone());
 
             log::line(format!("--- Coucou {} started ---", env!("CARGO_PKG_VERSION")));
+            // Idle watchdog: the Parakeet model is ~650 MB resident. Once
+            // neither OK Coucou is listening nor a dictation/recording needs
+            // it, and it has been unused for a while, free it. Reloaded on
+            // the next use (about 2 s), overlapping with the user speaking.
+            let idle = handle.clone();
+            std::thread::Builder::new()
+                .name("coucou-mem-idle".into())
+                .spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                    let busy = voice::is_listening() || flow::is_dictating() || notes::is_recording(&idle);
+                    if speech::unload_if_idle(busy) {
+                        log::line("speech: model freed after 5 min idle");
+                    }
+                })
+                .ok();
             hooks::ensure_hook_exe(&handle);
             pipe::start(handle.clone());
             phone_link::start_if_enabled(&handle);

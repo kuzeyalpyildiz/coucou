@@ -11,8 +11,9 @@ pub mod audio;
 
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use sherpa_onnx::{
@@ -284,6 +285,7 @@ fn threads() -> i32 {
 /// The loaded recognizer, loading it on first use (about 2 s).
 pub fn recognizer() -> Option<Arc<OfflineRecognizer>> {
     if let Some(r) = recognizer_slot().lock().unwrap().clone() {
+        mark_used();
         return Some(r);
     }
     if !PARAKEET.is_present() {
@@ -309,6 +311,7 @@ pub fn recognizer() -> Option<Arc<OfflineRecognizer>> {
         None => crate::log::line("Parakeet could not be loaded"),
     }
     *recognizer_slot().lock().unwrap() = r.clone();
+    mark_used();
     r
 }
 
@@ -330,6 +333,44 @@ pub fn unload() {
 /// True when the Parakeet recognizer is currently resident in memory.
 pub fn is_loaded() -> bool {
     recognizer_slot().lock().unwrap().is_some()
+}
+
+/// How long the model may sit unused before the idle watchdog frees it.
+/// Long enough that a normal dictation gap never pays a reload; short enough
+/// that an idle Coucou does not hold ~650 MB of RAM.
+pub const IDLE_UNLOAD: Duration = Duration::from_secs(5 * 60);
+
+/// Wall-clock time (ms) the model was last loaded or used.
+fn last_use() -> &'static AtomicU64 {
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    &LAST
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+/// Records that the model was just used, so the idle watchdog does not free it
+/// under an active dictation or a wake-word check.
+pub fn mark_used() {
+    last_use().store(now_ms(), Ordering::Relaxed);
+}
+
+/// True when the model has been unused for at least `IDLE_UNLOAD`.
+pub fn idle_too_long() -> bool {
+    let last = last_use().load(Ordering::Relaxed);
+    last != 0 && now_ms().saturating_sub(last) >= IDLE_UNLOAD.as_millis() as u64
+}
+
+/// Frees the model when it has gone unused while nothing needs it. Returns
+/// whether it unloaded. `busy` is true while OK Coucou listens or a dictation
+/// or a call recording is active — the model must stay then.
+pub fn unload_if_idle(busy: bool) -> bool {
+    if busy || !is_loaded() || !idle_too_long() {
+        return false;
+    }
+    unload();
+    true
 }
 
 /// What was said, and each word with its place in the audio.

@@ -175,7 +175,6 @@ fn enable(app: &AppHandle, flow: &Arc<Flow>) {
         .ok();
     *running = Some(Running { tx, _listener: listener });
     drop(running);
-    speech::preload();
     pill::update(app, |s| s.enabled = true);
     crate::log::line(format!("flow dictation on ({})", prefs.key.label()));
 }
@@ -201,6 +200,24 @@ struct Listening {
     take: Arc<Mutex<audio::Take>>,
     started: Instant,
     app: Option<(String, String)>,
+}
+
+/// True while a dictation is being captured, so the idle watchdog keeps the
+/// model loaded under it. Cleared when the capture is dropped.
+fn dictating() -> &'static AtomicBool {
+    static D: AtomicBool = AtomicBool::new(false);
+    &D
+}
+
+/// Whether a dictation is currently being captured.
+pub fn is_dictating() -> bool {
+    dictating().load(Ordering::Relaxed)
+}
+
+impl Drop for Listening {
+    fn drop(&mut self) {
+        dictating().store(false, Ordering::Relaxed);
+    }
 }
 
 fn run(app: AppHandle, flow: Arc<Flow>, rx: mpsc::Receiver<(KeyEvent, Instant)>) {
@@ -329,6 +346,10 @@ fn begin(app: &AppHandle, flow: &Arc<Flow>) -> Option<Listening> {
     match capture {
         Ok(capture) => {
             let app_front = os::foreground_app().filter(|(id, _)| !is_shell(id));
+            // Load the model while the user speaks, so the first dictation is
+            // ready without keeping it (and its ~650 MB) resident all session.
+            speech::preload();
+            dictating().store(true, Ordering::Relaxed);
             pill::update(app, |s| s.phase = "listening".into());
             Some(Listening { capture, take, started: Instant::now(), app: app_front })
         }
