@@ -127,6 +127,20 @@ session, and they are forgotten an hour after the last edit or when the session
 ends. When Claude finishes, the card keeps the first paragraph of its final
 answer on one line, still, until the next prompt.
 
+OpenCode V2 completed `patch` actions also show clickable filenames and **+N −M**
+snippets in their session's ticker. These use the tool's structured diff metadata,
+not file rereads or a live file watcher. Preview processing covers the first four
+files per action, within a 256 KB aggregate budget. Known credential paths,
+binary, malformed and oversized diffs are skipped. Separate hunks are shown as
+edit snippets, not full-file line positions. Approvals and questions are unchanged.
+
+Version 0.5.4 bundles plugin revision 8. On startup an installed, unmodified revision-7
+plugin is upgraded with a dated `coucou.js.bak-*` backup beside it. Customized,
+linked, newer or incomplete installations are not automatically overwritten; use
+Notch → Agents to review an available update. New integrations install the bundled
+plugin normally. Reload OpenCode configuration after an upgrade; refreshing the
+Coucou notch alone does not reload OpenCode's plugin.
+
 ## Flow, the Notetaker and « OK Coucou »
 
 Coucou has its own window (tray → Open, or launch Coucou again): **Flow** on the

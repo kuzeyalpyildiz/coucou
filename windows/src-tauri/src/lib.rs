@@ -930,6 +930,7 @@ pub fn run() {
                 })
                 .ok();
             hooks::ensure_hook_exe(&handle);
+            agents::upgrade_opencode_plugin();
             pipe::start(handle.clone());
             phone_link::start_if_enabled(&handle);
             integrations::start(handle.clone());

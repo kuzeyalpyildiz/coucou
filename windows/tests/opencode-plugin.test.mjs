@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import vm from 'node:vm';
+import { buildFileDiff } from '../src/core/diff.ts';
 
 const source = readFileSync(new URL('../src-tauri/src/opencode-plugin.js', import.meta.url), 'utf8')
   .replace('{HOOK}', JSON.stringify('dummy-relay'));
@@ -65,8 +66,145 @@ async function fixture(reply, options = {}) {
     } }) },
   });
   return { hooks, calls, cleanup, disposed, formReplies, warnings,
-    questionForm: module.namespace.questionForm, sameDirectory: module.namespace.sameDirectory };
+    questionForm: module.namespace.questionForm, sameDirectory: module.namespace.sameDirectory,
+    patchPreviews: module.namespace.patchPreviews };
 }
+
+const modified = (extra = {}) => ({ file: '/p/app.ts', status: 'modified', additions: 1, deletions: 1,
+  patch: 'Index: /p/app.ts\n--- /p/app.ts\n+++ /p/app.ts\n@@ -20,2 +20,2 @@\n context\n-old\n+new\n', ...extra });
+const patched = (files, extra = {}) => ({ sessionID: 'one', tool: 'patch', status: 'completed',
+  result: { metadata: { files } }, ...extra });
+
+test('completed patches relay each changed filename and clickable diff without leaking unrelated data', async () => {
+  const f = await fixture(null);
+  try {
+    const event = patched([modified(), modified({ file: '/p/second.ts' })], { input: { secret: 'never forward' } });
+    event.result.content = [{ text: 'never forward' }];
+    const original = JSON.stringify(event);
+    await f.hooks.get('tool.execute.after')(event);
+    assert.equal(f.calls.length, 2);
+    for (const [i, call] of f.calls.entries()) {
+      assert.equal(call.hook_event_name, 'PostToolUse');
+      assert.equal(call.session_id, 'one');
+      assert.equal(call.cwd, '/session');
+      const diff = buildFileDiff(call.tool_name, call.tool_input);
+      assert.equal(diff.path, i ? '/p/second.ts' : '/p/app.ts');
+      assert.deepEqual([diff.added, diff.removed, diff.tooLarge], [1, 1, false]);
+    }
+    assert.equal(JSON.stringify(f.calls).includes('never forward'), false);
+    assert.equal(JSON.stringify(event), original);
+  } finally { await f.cleanup(); }
+});
+
+test('added and deleted patch files use the existing Write and Edit viewers', async () => {
+  const f = await fixture(null);
+  try {
+    const previews = f.patchPreviews(patched([
+      modified({ file: '/p/new.ts', status: 'added', additions: 2, deletions: 0, patch: '@@ -0,0 +1,2 @@\n+one\n+two\n' }),
+      modified({ file: '/p/gone.ts', status: 'deleted', additions: 0, deletions: 1, patch: '@@ -1 +0,0 @@\n-old\n' }),
+    ]));
+    assert.deepEqual(Array.from(previews, (p) => p.tool_name), ['Write', 'Edit']);
+    assert.deepEqual(Array.from(previews, (p) => {
+      const d = buildFileDiff(p.tool_name, p.tool_input);
+      return [d.added, d.removed];
+    }), [[2, 0], [0, 1]]);
+  } finally { await f.cleanup(); }
+});
+
+test('multiple hunks remain separate snippets without inventing intervening file content', async () => {
+  const f = await fixture(null);
+  try {
+    const [p] = f.patchPreviews(patched([modified({ additions: 2, deletions: 2,
+      patch: '@@ -2 +2 @@\n-a\n+b\n@@ -200 +200 @@\n-c\n+d\n' })]));
+    assert.equal(p.tool_name, 'MultiEdit');
+    assert.equal(p.tool_input.edits.length, 2);
+    const diff = buildFileDiff(p.tool_name, p.tool_input);
+    assert.deepEqual([diff.added, diff.removed], [2, 2]);
+  } finally { await f.cleanup(); }
+});
+
+test('CRLF and missing final newlines preserve edit text', async () => {
+  const f = await fixture(null);
+  try {
+    const [p] = f.patchPreviews(patched([modified({
+      patch: '@@ -1 +1 @@\r\n-old\r\n\\ No newline at end of file\r\n+new\r\n\\ No newline at end of file\r\n' })]));
+    assert.equal(p.tool_input.old_string, 'old');
+    assert.equal(p.tool_input.new_string, 'new');
+  } finally { await f.cleanup(); }
+});
+
+test('failed patches, missing metadata and unrelated tools retain activity-only forwarding', async () => {
+  const f = await fixture(null);
+  try {
+    for (const event of [patched([modified()], { status: 'error' }), patched(null),
+      patched([modified()], { tool: 'shell' }), patched([modified()], { result: {} }),
+      patched([modified()], { result: { metadata: { files: [modified()], truncated: true } } })]) {
+      await f.hooks.get('tool.execute.after')(event);
+    }
+    assert.equal(f.calls.length, 5);
+    assert.equal(f.calls[0].hook_event_name, 'PostToolUseFailure');
+    assert.ok(f.calls.every((c) => !c.tool_input));
+  } finally { await f.cleanup(); }
+});
+
+test('malformed, binary, overlapping and count-mismatched diffs are skipped', async () => {
+  const f = await fixture(null);
+  try {
+    for (const file of [null, modified({ additions: 99 }), modified({ deletions: -1 }),
+      modified({ patch: 'Binary files differ' }), modified({ patch: '@@ -1,2 +1,2 @@\n-a\n+b\n' }),
+      modified({ patch: '@@ -1 +1 @@\n-a\n+b\ninvalid\n' }), modified({ status: 'added' }),
+      modified({ file: '/p/a\n.ts' }), modified({ file: '' }),
+      modified({ additions: 2, deletions: 2, patch: '@@ -2 +2 @@\n-a\n+b\n@@ -1 +1 @@\n-c\n+d\n' }),
+    ]) assert.equal(f.patchPreviews(patched([file])).length, 0);
+    assert.equal(f.patchPreviews(patched([null, modified()])).length, 1);
+  } finally { await f.cleanup(); }
+});
+
+test('credential files stay out of previews, with documentation templates allowed', async () => {
+  const f = await fixture(null);
+  try {
+    for (const file of ['/p/.env', '/p/.env.production', '/p/auth.json', '/p/private.key',
+      'C:\\p\\credentials.new-cli.bak.json', '/p/id_ed25519', '/p/service-account.json']) {
+      assert.equal(f.patchPreviews(patched([modified({ file })])).length, 0, file);
+    }
+    assert.equal(f.patchPreviews(patched([modified({ file: '/p/.env.example' })])).length, 1);
+  } finally { await f.cleanup(); }
+});
+
+test('preview work is bounded by file count, UTF-8 bytes, line count and JSON escaping', async () => {
+  const f = await fixture(null);
+  try {
+    assert.equal(f.patchPreviews(patched(Array.from({ length: 100 }, () => modified()))).length, 4);
+    for (const file of [modified({ patch: '界'.repeat(80000) }), modified({ file: '界'.repeat(1000) }),
+      modified({ status: 'added', additions: 5000, deletions: 0, patch: '@@ -0,0 +1,5000 @@\n' + '+x\n'.repeat(5000) }),
+      modified({ patch: `@@ -1 +1 @@\n-${'\u0001'.repeat(24000)}old\n+${'\u0001'.repeat(24000)}new\n` }),
+    ]) assert.equal(f.patchPreviews(patched([file])).length, 0);
+    const previews = f.patchPreviews(patched(Array.from({ length: 4 }, () => modified({
+      patch: `@@ -1 +1 @@\n-${'a'.repeat(60000)}\n+${'b'.repeat(60000)}\n` }))));
+    assert.equal(previews.length, 2);
+    assert.ok(new TextEncoder().encode(JSON.stringify(previews)).length < 256 * 1024);
+  } finally { await f.cleanup(); }
+});
+
+test('empty and newline-only patches do not produce empty clickable cards', async () => {
+  const f = await fixture(null);
+  try {
+    for (const patch of ['@@ -1,0 +1,0 @@\n', '@@ -1 +1 @@\n-same\n+same\n\\ No newline at end of file\n']) {
+      assert.equal(f.patchPreviews(patched([modified({ patch })])).length, 0);
+    }
+  } finally { await f.cleanup(); }
+});
+
+test('a failed preview relay cannot fail the tool or auto-approve a later permission', async () => {
+  const f = await fixture(null, { exitCode: 1 });
+  try {
+    await assert.doesNotReject(f.hooks.get('tool.execute.after')(patched([modified()])));
+    const event = { sessionID: 'one', effect: 'ask', action: 'shell', resources: ['echo test'] };
+    await f.hooks.get('permission.evaluate')(event);
+    assert.equal(event.effect, 'ask');
+  } finally { await f.cleanup(); }
+  assert.equal(f.disposed.length, 4);
+});
 
 test('idle, busy and retry statuses do not imply session completion', async () => {
   const f = await fixture(null, { events: [

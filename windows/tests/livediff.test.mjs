@@ -120,6 +120,21 @@ test("an agent pill's diffs go with the pill", () => {
   assert.equal(State.sessionDiffs.has("agent_ghost"), false);
 });
 
+test("OpenCode patch previews belong to their session and expose clickable filenames", () => {
+  const identity = { coucou_agent: "opencode", session_id: "ses_patch", cwd: "/p/proj" };
+  hook({ hook_event_name: "PreToolUse", tool_name: "patch", ...identity });
+  const own = State.tasks.find((t) => t.sessionId === identity.session_id);
+  assert.ok(own);
+  edit(identity);
+  const step = parseDiffStep(own.steps.at(-1));
+  assert.equal(step.filename, "app.ts");
+  const diff = State.findDiff(own.id, step.diffId);
+  assert.deepEqual([diff.path, diff.added, diff.removed], ["/p/proj/src/app.ts", 2, 1]);
+  assert.equal(diffs(CLAUDE).length, 0);
+  hook({ hook_event_name: "SessionEnd", ...identity });
+  assert.equal(State.sessionDiffs.has(own.id), false);
+});
+
 // ── Final message ─────────────────────────────────────────────────────────────
 
 test("Stop shows the first paragraph of Claude's final message, on one line", () => {

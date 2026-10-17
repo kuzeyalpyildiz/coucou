@@ -1,5 +1,12 @@
 # Changelog
 
+## Windows and Linux 0.5.4 — October 18, 2026 (OpenCode fork)
+
+- Completed OpenCode V2 patch actions now show changed filenames and clickable addition/removal previews in the notch's existing diff viewer.
+- Existing unmodified revision-7 integrations upgrade at app startup with a dated backup. Customized, linked, incomplete and newer plugins are left alone; older/custom integrations can be reviewed in Notch → Agents.
+- Preview work is bounded to the first four files and 256 KB per patch action. Known credential files, binary data and malformed/oversized diffs are excluded. Approvals, questions, voice and phone pairing are unchanged.
+- Reload OpenCode configuration after the plugin upgrade to activate the previews. This release does not change the macOS app or its Info.plist version.
+
 ## Windows and Linux 0.5.0 — October 15, 2026
 
 Windows and Linux catch up with the Mac's 0.3.0 and 0.4.0: the Coucou window, Flow dictation, the Notetaker and « OK Coucou ». All of it free and open source.

@@ -148,6 +148,7 @@ macOS releases are published as `v*` tags. See [CHANGELOG.md](CHANGELOG.md) for 
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| Windows/Linux fork 0.5.4 | Oct 18, 2026 | OpenCode patch diff previews; backed-up upgrade for stock integrations |
 | [0.4.0](https://github.com/Louis-CFM/coucou/releases/tag/v0.4.0) | Oct 14, 2026 | Coucou becomes an app: Flow dictation anywhere, Parakeet offline, the Notetaker, a window in the Dock |
 | [0.3.0](https://github.com/Louis-CFM/coucou/releases/tag/v0.3.0) | Oct 11, 2026 | « OK Coucou »: talk to Mochi, powered by Claude — pills, music, your services, web search, emails |
 | [0.2.3](https://github.com/Louis-CFM/coucou/releases/tag/v0.2.3) | Oct 8, 2026 | Terminal sessions, Spotify, a colour per Mochi, dictation in any language, open on hover, your own sounds |
