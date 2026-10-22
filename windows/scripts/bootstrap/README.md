@@ -1,6 +1,6 @@
 # Latest installer
 
-`coucou-latest.exe` queries `kuzeyalpyildiz/coucou`'s latest stable public
+`coucou-latest.exe` queries `kuzeyalpyildiz/coucou-custom`'s latest stable public
 GitHub Release each time it runs. It does not use expiring Actions artifacts,
 prereleases, or a bundled fallback MSI. Internet access and .NET Framework 4.x
 are required. This distribution currently installs the x64 Windows package.

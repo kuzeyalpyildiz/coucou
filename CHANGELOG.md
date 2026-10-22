@@ -1,5 +1,13 @@
 # Changelog
 
+## Windows 0.5.5 — October 22, 2026 (Coucou Custom grand release)
+
+- **Optional Turkish dictation**: download omniASR CTC 300M int8 separately (about 366 MB), then select it in Flow → Settings → Recognition. The offline model uses pinned, SHA-256-verified files; Parakeet remains the default for existing users.
+- **Organized Flow Settings**: Dictation, Recognition, Notetaker, Privacy, and App sections with keyboard-accessible jump controls. Model selection, downloads, retention, deletion, and window behavior have distinct places; the sidebar and saved preferences are preserved.
+- **Latest installer**: `coucou-latest.exe` now queries `kuzeyalpyildiz/coucou-custom` and verifies the stable release MSI against its checksum manifest.
+- Includes the OpenCode revision-8 plugin and safe stock revision-7 upgrade from 0.5.4, with per-session patch previews, approvals, questions, and terminal handoff.
+- Turkish selection affects dictation only. Notetaker and “OK Coucou” continue using Parakeet; the planned assistant recognition, latency, and command improvements are not included. Language accuracy still needs user testing. Windows binaries remain unsigned; this release does not change macOS or Android versions.
+
 ## Windows and Linux 0.5.4 — October 18, 2026 (OpenCode fork)
 
 - Completed OpenCode V2 patch actions now show changed filenames and clickable addition/removal previews in the notch's existing diff viewer.
