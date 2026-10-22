@@ -8,6 +8,7 @@
 // ~/.local/share/coucou/Models (Linux). From then on everything runs offline.
 
 pub mod audio;
+pub mod multilingual;
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -130,6 +131,8 @@ pub enum ModelState {
 #[serde(rename_all = "camelCase")]
 pub struct ModelsStatus {
     pub parakeet: ModelState,
+    pub multilingual: ModelState,
+    pub multilingual_download_mb: u64,
     /// Size of the whole download in MB, both sets.
     pub download_mb: u64,
 }
@@ -157,7 +160,7 @@ pub fn status() -> ModelsStatus {
     } else {
         ModelState::Missing
     };
-    ModelsStatus { parakeet, download_mb: (PARAKEET.total_size() + DIARIZER.total_size()) / 1_000_000 }
+    ModelsStatus { parakeet, multilingual: multilingual::status(), multilingual_download_mb: multilingual::download_mb(), download_mb: (PARAKEET.total_size() + DIARIZER.total_size()) / 1_000_000 }
 }
 
 pub fn is_ready() -> bool {
@@ -328,11 +331,12 @@ pub fn preload() {
 /// Frees the model's memory (dictation turned off, models removed).
 pub fn unload() {
     *recognizer_slot().lock().unwrap() = None;
+    multilingual::unload();
 }
 
 /// True when the Parakeet recognizer is currently resident in memory.
 pub fn is_loaded() -> bool {
-    recognizer_slot().lock().unwrap().is_some()
+    recognizer_slot().lock().unwrap().is_some() || multilingual::is_loaded()
 }
 
 /// How long the model may sit unused before the idle watchdog frees it.
@@ -387,6 +391,10 @@ const MAX_CHUNK_SECONDS: f64 = 28.0;
 /// Transcribes 16 kHz mono audio.
 pub fn transcribe(samples: &[f32]) -> Option<Transcript> {
     let rec = recognizer()?;
+    transcribe_with(&rec, samples)
+}
+
+pub(super) fn transcribe_with(rec: &OfflineRecognizer, samples: &[f32]) -> Option<Transcript> {
     let mut out = Transcript::default();
     for (offset, chunk) in audio::split_for_model(samples, SAMPLE_RATE, MAX_CHUNK_SECONDS) {
         if chunk.len() < (SAMPLE_RATE as usize) / 4 {

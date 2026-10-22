@@ -5,7 +5,7 @@
 import { h, clear } from "../../views/dom";
 import { t } from "../../i18n/i18n";
 import { onEvent } from "../../core/bridge";
-import { FlowBridge, type FlowEntry, type FlowStats } from "../../core/flow";
+import { FlowBridge, dictationModelState, type FlowEntry, type FlowStats } from "../../core/flow";
 import type { HubContext } from "../shell";
 import { emptyState, glowCard } from "../hero";
 import { button, card, icon, iconButton, keyLabel, label, number, row, shortCount, toggle } from "../ui";
@@ -32,7 +32,7 @@ function time(ms: number): string {
 export async function dictationPage(page: HTMLElement, ctx: HubContext) {
   const status = await ctx.refresh();
   const key = keyLabel(status.keys === "wayland" ? "wayland" : status.prefs.key, status.platform);
-  const ready = status.prefs.enabled && status.models.parakeet.state === "ready";
+  const ready = status.prefs.enabled && dictationModelState(status).state === "ready";
 
   const record = button(t("Record a call"), () => {
     void FlowBridge.startNote().then(() => ctx.navigate("notes"), (err) => alertLine.replaceChildren(String(err)));
@@ -146,6 +146,8 @@ function setup(ctx: HubContext): HTMLElement {
   body.append(row(t("Turn on dictation"), null, toggle(status.prefs.enabled, (on) => {
     void ctx.setPrefs((p) => (p.enabled = on)).then(() => ctx.navigate("dictation"));
   })));
-  body.append(row(t("Parakeet, on your computer"), t("The most accurate, offline, 25 languages. Downloaded once (about {0} MB).", { 0: number(status.models.downloadMb) }), modelsControl(ctx, () => ctx.navigate("dictation"))));
+  const multilingual = status.prefs.dictationModel === "multilingual";
+  body.append(row(multilingual ? t("Omnilingual — Turkish dictation") : t("Parakeet, on your computer"), multilingual ? t("Optional offline dictation model supporting Turkish.") : t("The most accurate, offline, 25 languages. Downloaded once (about {0} MB).", { 0: number(status.models.downloadMb) }), modelsControl(ctx, () => ctx.navigate("dictation"), multilingual ? "multilingual" : "parakeet")));
+  body.append(button(t("Choose dictation model in Settings"), () => ctx.navigate("flowsettings")));
   return glowCard("#FB923C", body);
 }

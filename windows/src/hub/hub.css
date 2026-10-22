@@ -31,6 +31,56 @@ body.hub-window {
   height: 100vh;
 }
 
+/* Settings stays in the existing charcoal/orange vocabulary. Sections encode
+   purpose; downloads and destructive actions remain separate from preferences. */
+.hub-settings-index {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-block: 8px 12px;
+  padding-block-end: 16px;
+  border-block-end: 1px solid var(--hub-line);
+}
+
+.hub-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-block-end: 24px;
+}
+
+.hub-settings-heading {
+  margin: 0;
+  padding-block: 8px;
+  scroll-margin-block-start: 16px;
+  font: 650 15px/1.4 var(--font);
+  color: var(--hub-text);
+}
+
+.hub-settings-heading:focus-visible,
+.hub-settings-index button:focus-visible {
+  outline: 2px solid var(--hub-accent);
+  outline-offset: 4px;
+  border-radius: 5px;
+}
+
+.hub-settings-section .hub-row {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.hub-settings-section .hub-row > .text {
+  flex-basis: 240px;
+}
+
+.hub-settings-section select {
+  max-width: 100%;
+}
+
+.hub-settings-deletion {
+  border-color: color-mix(in srgb, var(--hub-red) 25%, var(--hub-line));
+}
+
 /* ── Sidebar ──────────────────────────────────────────────────────────────── */
 
 .hub-side {

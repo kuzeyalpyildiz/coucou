@@ -4,6 +4,22 @@
 
 # Coucou for Windows
 
+### Optional Turkish dictation (development)
+
+In **Flow → Settings → Recognition**, download **Omnilingual — Turkish dictation**
+and select it as the **Dictation model**. This separate, opt-in download is about
+366 MB; Parakeet remains the default and existing preferences do not change.
+The omniASR CTC 300M int8 model runs locally through sherpa-onnx and supports
+Turkish as part of its multilingual coverage. Accuracy varies by language; the
+small CTC model should not be assumed to match the larger omniASR LLM models.
+
+This selection affects **dictation only**. Notetaker and “OK Coucou” still use
+Parakeet and do not gain Turkish support. Removing the optional model does not
+remove Parakeet; reselect Parakeet or redownload before dictating again.
+Files are pinned to an immutable upstream revision and checked against SHA-256
+before installation. No model is downloaded until you press Download.
+Model: Meta Omnilingual ASR, Apache-2.0; ONNX export by csukuangfj.
+
 **Mochi doesn't get a notch on a PC — so it lives at the top of your screen instead.**
 
 Approve Claude Code permissions, watch your session work, drop a file, chat with Claude, keep an eye on your services — without leaving what you're doing.

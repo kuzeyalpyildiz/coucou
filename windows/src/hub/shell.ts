@@ -7,7 +7,7 @@ import "./hub.css";
 import { h, clear } from "../views/dom";
 import { t } from "../i18n/i18n";
 import { onEvent } from "../core/bridge";
-import { FlowBridge, type FlowPrefs, type FlowStatus, type ModelsStatus } from "../core/flow";
+import { FlowBridge, dictationModelState, type FlowPrefs, type FlowStatus, type ModelsStatus } from "../core/flow";
 import { hero, liveMochi } from "./hero";
 import { icon, keyLabel } from "./ui";
 import { loadSaved } from "./load";
@@ -133,7 +133,7 @@ export async function startHub(root: HTMLElement, opts: HubOptions) {
 
   function drawStatus() {
     clear(statusLine);
-    const models = status.models.parakeet.state;
+    const models = dictationModelState(status).state;
     let color = "#6b7079";
     let text: string;
     if (!status.prefs.enabled) {

@@ -29,6 +29,7 @@ export interface FlowPrefs {
   key: FlowKey;
   edge: Edge;
   mic: string;
+  dictationModel?: "parakeet" | "multilingual";
   keepDays: number;
   cleanup: boolean;
   defaultStyle: Style;
@@ -49,6 +50,8 @@ export type ModelState =
 
 export interface ModelsStatus {
   parakeet: ModelState;
+  multilingual?: ModelState;
+  multilingualDownloadMb?: number;
   downloadMb: number;
 }
 
@@ -62,6 +65,13 @@ export interface FlowStatus {
   platform: "windows" | "linux";
   autostarted: boolean;
   userName?: string | null;
+}
+
+/** Missing fields from old settings always retain the Parakeet default. */
+export function dictationModelState(status: FlowStatus): ModelState {
+  return status.prefs.dictationModel === "multilingual"
+    ? status.models.multilingual ?? { state: "missing" }
+    : status.models.parakeet;
 }
 
 export interface FlowEntry {
@@ -201,6 +211,8 @@ export const FlowBridge = {
   pasteAgain: () => call<void>("flow_paste_again"),
   download: () => call<void>("flow_models_download"),
   removeModels: () => call<void>("flow_models_remove"),
+  downloadMultilingual: () => callOrThrow<void>("flow_multilingual_download"),
+  removeMultilingual: () => callOrThrow<void>("flow_multilingual_remove"),
 
   notes: () => call<NotesState>("notes_state"),
   startNote: () => callOrThrow<string>("notes_start"),

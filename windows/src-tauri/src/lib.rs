@@ -858,6 +858,8 @@ pub fn run() {
             flow::flow_paste_again,
             flow::flow_models_download,
             flow::flow_models_remove,
+            speech::multilingual::flow_multilingual_download,
+            speech::multilingual::flow_multilingual_remove,
             flow::pill_state,
             flow::pill_hot,
             flow::pill_hover,

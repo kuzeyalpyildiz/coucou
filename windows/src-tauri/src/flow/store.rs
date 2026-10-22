@@ -82,6 +82,34 @@ pub enum SummaryEngine {
     Off,
 }
 
+/// Only dictation uses this selection; calls and wake words keep Parakeet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DictationModel {
+    #[default]
+    Parakeet,
+    Multilingual,
+}
+
+#[cfg(test)]
+mod dictation_model_tests {
+    use super::*;
+
+    #[test]
+    fn old_preferences_keep_parakeet() {
+        let prefs: Prefs = serde_json::from_str("{}").unwrap();
+        assert_eq!(prefs.dictation_model, DictationModel::Parakeet);
+    }
+
+    #[test]
+    fn multilingual_selection_round_trips() {
+        let prefs: Prefs = serde_json::from_str(r#"{"dictationModel":"multilingual"}"#).unwrap();
+        assert_eq!(prefs.dictation_model, DictationModel::Multilingual);
+        assert_eq!(serde_json::to_value(prefs).unwrap()["dictationModel"], "multilingual");
+        assert!(serde_json::from_str::<Prefs>(r#"{"dictationModel":"arbitrary-path"}"#).is_err());
+    }
+}
+
 /// The preferences of dictation and of the window.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -92,6 +120,7 @@ pub struct Prefs {
     pub edge: Edge,
     /// The microphone by name; empty is the system's default.
     pub mic: String,
+    pub dictation_model: DictationModel,
     /// Days the history is kept: 0 = not kept, -1 = forever.
     pub keep_days: i64,
     /// Clean the words with Claude before pasting them (needs the Claude key).
@@ -118,6 +147,7 @@ impl Default for Prefs {
             key: FlowKey::default(),
             edge: Edge::Bottom,
             mic: String::new(),
+            dictation_model: DictationModel::Parakeet,
             keep_days: 30,
             cleanup: false,
             default_style: Style::Natural,

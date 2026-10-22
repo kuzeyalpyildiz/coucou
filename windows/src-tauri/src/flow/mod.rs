@@ -319,7 +319,12 @@ fn run(app: AppHandle, flow: Arc<Flow>, rx: mpsc::Receiver<(KeyEvent, Instant)>)
 
 /// Opens the microphone. None (and the pill says why) when it can't.
 fn begin(app: &AppHandle, flow: &Arc<Flow>) -> Option<Listening> {
-    if !speech::is_ready() {
+    let model = flow.store.lock().unwrap().prefs.dictation_model;
+    let ready = match model {
+        store::DictationModel::Parakeet => speech::is_ready(),
+        store::DictationModel::Multilingual => speech::multilingual::is_ready(),
+    };
+    if !ready {
         pill::announce(
             app,
             "download",
@@ -401,7 +406,11 @@ fn finish(app: &AppHandle, flow: &Arc<Flow>, mut l: Listening, busy: Arc<AtomicB
 
 fn process(app: &AppHandle, flow: &Arc<Flow>, samples: &[f32], front: Option<&(String, String)>, seconds: f64) -> Result<(), String> {
     let started = Instant::now();
-    let transcript = speech::transcribe(samples).ok_or("the voice model is not loaded")?;
+    let model = flow.store.lock().unwrap().prefs.dictation_model;
+    let transcript = match model {
+        store::DictationModel::Parakeet => speech::transcribe(samples),
+        store::DictationModel::Multilingual => speech::multilingual::transcribe(samples),
+    }.ok_or("the selected dictation model is not loaded")?;
     let raw = transcript.text.trim().to_string();
     if raw.is_empty() {
         pill::update(app, |s| s.phase = "idle".into());
