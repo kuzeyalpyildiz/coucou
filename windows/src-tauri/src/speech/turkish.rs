@@ -101,7 +101,7 @@ pub fn transcribe(samples: &[f32]) -> Option<Transcript> {
             };
             config.model_config.tokens = Some(MODELS.path("tokens.txt"));
             config.model_config.num_threads = super::threads();
-            config.model_config.sample_rate = super::SAMPLE_RATE as i32;
+            config.feat_config.sample_rate = super::SAMPLE_RATE as i32;
             config.decoding_method = Some("modified_beam_search".into());
             config.max_active_paths = 12;
             s.recognizer = OnlineRecognizer::create(&config).map(Arc::new);

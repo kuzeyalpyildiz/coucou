@@ -1,8 +1,7 @@
 name: Windows CI
 
 # Type-checks and tests the Windows app on every pull request that touches it.
-# Nothing is packed and nothing is published: releases stay in windows.yml,
-# which only runs on tags.
+# Dev pushes also produce test installers as artifacts, never releases.
 
 on:
   pull_request:
@@ -64,4 +63,30 @@ jobs:
         run: cargo build --release -p coucou-hook
 
       - name: Rust tests
-        run: cargo test --workspace --locked
+        shell: pwsh
+        run: |
+          cargo test --workspace --locked 2>&1 | Tee-Object -FilePath rust-tests.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload Rust diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-rust-diagnostics
+          path: windows/rust-tests.log
+          retention-days: 3
+
+      - name: Build Windows test installers
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        run: npm run pack
+
+      - name: Upload Windows test installers
+        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        uses: actions/upload-artifact@v7
+        with:
+          name: Coucou-Windows-dev-${{ github.sha }}
+          path: |
+            windows/release/*.exe
+            windows/release/*.msi
+          if-no-files-found: error
+          retention-days: 3
