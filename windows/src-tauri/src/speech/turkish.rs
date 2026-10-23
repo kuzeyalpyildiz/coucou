@@ -95,14 +95,14 @@ pub fn transcribe(samples: &[f32]) -> Option<Transcript> {
         if s.recognizer.is_none() {
             let mut config = OnlineRecognizerConfig::default();
             config.model_config.transducer = OnlineTransducerModelConfig {
-                encoder: MODELS.path("encoder-epoch-1-avg-1-chunk-32-left-128.int8.onnx"),
-                decoder: MODELS.path("decoder-epoch-1-avg-1-chunk-32-left-128.int8.onnx"),
-                joiner: MODELS.path("joiner-epoch-1-avg-1-chunk-32-left-128.int8.onnx"),
+                encoder: Some(MODELS.path("encoder-epoch-1-avg-1-chunk-32-left-128.int8.onnx")),
+                decoder: Some(MODELS.path("decoder-epoch-1-avg-1-chunk-32-left-128.int8.onnx")),
+                joiner: Some(MODELS.path("joiner-epoch-1-avg-1-chunk-32-left-128.int8.onnx")),
             };
-            config.model_config.tokens = MODELS.path("tokens.txt");
+            config.model_config.tokens = Some(MODELS.path("tokens.txt"));
             config.model_config.num_threads = super::threads();
             config.model_config.sample_rate = super::SAMPLE_RATE as i32;
-            config.decoding_method = "modified_beam_search".into();
+            config.decoding_method = Some("modified_beam_search".into());
             config.max_active_paths = 12;
             s.recognizer = OnlineRecognizer::create(&config).map(Arc::new);
         }
@@ -116,9 +116,9 @@ pub fn transcribe(samples: &[f32]) -> Option<Transcript> {
     stream.accept_waveform(super::SAMPLE_RATE as i32, samples);
     stream.input_finished();
     while rec.is_ready(&stream) {
-        rec.decode_stream(&mut stream);
+        rec.decode(&stream);
     }
-    let text = rec.get_result(&stream).trim().to_string();
+    let text = rec.get_result(&stream).map(|r| r.text).unwrap_or_default().trim().to_string();
     Some(Transcript { text, words: Vec::new() })
 }
 
