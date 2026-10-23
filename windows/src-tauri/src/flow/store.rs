@@ -89,6 +89,7 @@ pub enum DictationModel {
     #[default]
     Parakeet,
     Multilingual,
+    Turkish,
 }
 
 #[cfg(test)]
@@ -107,6 +108,13 @@ mod dictation_model_tests {
         assert_eq!(prefs.dictation_model, DictationModel::Multilingual);
         assert_eq!(serde_json::to_value(prefs).unwrap()["dictationModel"], "multilingual");
         assert!(serde_json::from_str::<Prefs>(r#"{"dictationModel":"arbitrary-path"}"#).is_err());
+    }
+
+    #[test]
+    fn turkish_selection_round_trips() {
+        let prefs: Prefs = serde_json::from_str(r#"{"dictationModel":"turkish"}"#).unwrap();
+        assert_eq!(prefs.dictation_model, DictationModel::Turkish);
+        assert_eq!(serde_json::to_value(prefs).unwrap()["dictationModel"], "turkish");
     }
 }
 

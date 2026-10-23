@@ -10,8 +10,11 @@ use serde::Serialize;
 pub struct MemoryProfile {
     /// Resident working set, MiB.
     pub working_set_mb: u64,
-    /// Whether the ~670 MB Parakeet model is currently loaded.
+    /// Whether either recognizer is currently cached.
     pub model_loaded: bool,
+    pub parakeet_loaded: bool,
+    pub multilingual_loaded: bool,
+    pub turkish_loaded: bool,
     /// Whether « OK Coucou » listening thread is running.
     pub voice_listening: bool,
     /// Bounded audio queue depth is fixed at compile time (4 chunks).
@@ -66,6 +69,9 @@ pub fn profile() -> MemoryProfile {
     MemoryProfile {
         working_set_mb: working_set_mb(),
         model_loaded: crate::speech::is_loaded(),
+        parakeet_loaded: crate::speech::is_parakeet_loaded(),
+        multilingual_loaded: crate::speech::multilingual::is_loaded(),
+        turkish_loaded: crate::speech::turkish::is_loaded(),
         voice_listening: crate::voice::is_listening(),
         audio_queue_bound: 4,
     }
@@ -75,10 +81,13 @@ pub fn profile() -> MemoryProfile {
 pub fn profile_line() -> String {
     let p = profile();
     format!(
-        "memory: {} MB working set, model {}, voice {}",
+        "memory: {} MB working set, model {}, voice {}, Parakeet cache {}, optional dictation cache {}, Turkish dictation cache {}",
         p.working_set_mb,
         if p.model_loaded { "loaded" } else { "unloaded" },
         if p.voice_listening { "listening" } else { "off" },
+        if p.parakeet_loaded { "loaded" } else { "unloaded" },
+        if p.multilingual_loaded { "loaded" } else { "unloaded" },
+        if p.turkish_loaded { "loaded" } else { "unloaded" },
     )
 }
 

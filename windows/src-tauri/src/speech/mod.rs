@@ -9,6 +9,7 @@
 
 pub mod audio;
 pub mod multilingual;
+pub mod turkish;
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -133,6 +134,8 @@ pub struct ModelsStatus {
     pub parakeet: ModelState,
     pub multilingual: ModelState,
     pub multilingual_download_mb: u64,
+    pub turkish: ModelState,
+    pub turkish_download_mb: u64,
     /// Size of the whole download in MB, both sets.
     pub download_mb: u64,
 }
@@ -160,7 +163,7 @@ pub fn status() -> ModelsStatus {
     } else {
         ModelState::Missing
     };
-    ModelsStatus { parakeet, multilingual: multilingual::status(), multilingual_download_mb: multilingual::download_mb(), download_mb: (PARAKEET.total_size() + DIARIZER.total_size()) / 1_000_000 }
+    ModelsStatus { parakeet, multilingual: multilingual::status(), multilingual_download_mb: multilingual::download_mb(), turkish: turkish::status(), turkish_download_mb: turkish::download_mb(), download_mb: (PARAKEET.total_size() + DIARIZER.total_size()) / 1_000_000 }
 }
 
 pub fn is_ready() -> bool {
@@ -287,6 +290,18 @@ fn threads() -> i32 {
 
 /// The loaded recognizer, loading it on first use (about 2 s).
 pub fn recognizer() -> Option<Arc<OfflineRecognizer>> {
+    recognizer_for_preload(None)
+}
+
+fn preload_generation() -> &'static AtomicU64 {
+    static GENERATION: AtomicU64 = AtomicU64::new(0);
+    &GENERATION
+}
+
+fn recognizer_for_preload(generation: Option<u64>) -> Option<Arc<OfflineRecognizer>> {
+    if generation.is_some_and(|g| g != preload_generation().load(Ordering::SeqCst)) {
+        return None;
+    }
     if let Some(r) = recognizer_slot().lock().unwrap().clone() {
         mark_used();
         return Some(r);
@@ -295,6 +310,10 @@ pub fn recognizer() -> Option<Arc<OfflineRecognizer>> {
         return None;
     }
     let _guard = load_lock().lock().unwrap();
+    // An unload cancels queued preloads as well as the current cached model.
+    if generation.is_some_and(|g| g != preload_generation().load(Ordering::SeqCst)) {
+        return None;
+    }
     if let Some(r) = recognizer_slot().lock().unwrap().clone() {
         return Some(r);
     }
@@ -323,20 +342,33 @@ pub fn preload() {
     if !PARAKEET.is_present() || recognizer_slot().lock().unwrap().is_some() {
         return;
     }
-    std::thread::spawn(|| {
-        let _ = recognizer();
+    let generation = preload_generation().load(Ordering::SeqCst);
+    std::thread::spawn(move || {
+        let _ = recognizer_for_preload(Some(generation));
     });
+}
+
+/// Release only Parakeet. In-flight decodes keep their own Arc until finished.
+pub fn unload_parakeet() {
+    preload_generation().fetch_add(1, Ordering::SeqCst);
+    let _guard = load_lock().lock().unwrap();
+    *recognizer_slot().lock().unwrap() = None;
 }
 
 /// Frees the model's memory (dictation turned off, models removed).
 pub fn unload() {
-    *recognizer_slot().lock().unwrap() = None;
+    unload_parakeet();
     multilingual::unload();
+    turkish::unload();
 }
 
-/// True when the Parakeet recognizer is currently resident in memory.
+/// True when any speech recognizer is currently resident in memory.
 pub fn is_loaded() -> bool {
-    recognizer_slot().lock().unwrap().is_some() || multilingual::is_loaded()
+    is_parakeet_loaded() || multilingual::is_loaded() || turkish::is_loaded()
+}
+
+pub fn is_parakeet_loaded() -> bool {
+    recognizer_slot().lock().unwrap().is_some()
 }
 
 /// How long the model may sit unused before the idle watchdog frees it.
@@ -370,10 +402,10 @@ pub fn idle_too_long() -> bool {
 /// whether it unloaded. `busy` is true while OK Coucou listens or a dictation
 /// or a call recording is active — the model must stay then.
 pub fn unload_if_idle(busy: bool) -> bool {
-    if busy || !is_loaded() || !idle_too_long() {
+    if busy || recognizer_slot().lock().unwrap().is_none() || !idle_too_long() {
         return false;
     }
-    unload();
+    unload_parakeet();
     true
 }
 

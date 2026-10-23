@@ -536,7 +536,7 @@ final class ClaudeService {
     // MARK: - Voice brain turn (Claude with Coucou's tools)
 
     /// One Messages API call for the voice brain: returns the assistant content blocks and
-    /// the stop reason. The fast model first, the Settings model if the key can't use it.
+    /// the stop reason. Honor the Settings model, with one distinct fast fallback.
     func voiceTurn(system: String, messages: [[String: Any]], tools: [[String: Any]])
         async -> (content: [[String: Any]], stopReason: String)? {
         guard let key = apiKey, !key.isEmpty else { return nil }
@@ -544,10 +544,13 @@ final class ClaudeService {
             ["model": model, "max_tokens": 2048, "system": system, "tools": tools, "messages": messages]
         }
         let data: Data
+        let selected = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let primary = selected.isEmpty ? Self.voiceModel : selected
         do {
-            data = try await callAPI(body: body(Self.voiceModel), key: key, beta: "web-search-2025-03-05")
+            data = try await callAPI(body: body(primary), key: key, beta: "web-search-2025-03-05")
         } catch {
-            guard let retry = try? await callAPI(body: body(model), key: key, beta: "web-search-2025-03-05") else {
+            guard primary != Self.voiceModel,
+                  let retry = try? await callAPI(body: body(Self.voiceModel), key: key, beta: "web-search-2025-03-05") else {
                 appendAppLog("nb.log", "[Voice] Claude turn failed: \(error.localizedDescription)")
                 return nil
             }

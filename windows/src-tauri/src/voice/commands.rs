@@ -1,5 +1,5 @@
 // Recognized text is a catalog lookup key, never an executable, URL or shell
-// argument. App discovery and activation are native Rust/Windows Shell calls.
+// argument. Discovery and activation use Windows Shell identities or Linux GIO.
 use super::wake::normalize;
 
 fn app_name(text: &str) -> Option<String> {
@@ -13,10 +13,11 @@ fn app_name(text: &str) -> Option<String> {
 }
 
 #[derive(Debug, Clone)]
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "linux", test))]
 pub(super) struct AppName {
     pub label: String,
-    /// Windows' canonical parsing identity, not merely the shortcut's label.
+    /// Canonical Windows parsing identity or case-sensitive Linux desktop ID,
+    /// not merely the app's display label.
     pub identity: String,
 }
 
@@ -36,7 +37,7 @@ pub(super) fn system_target(wanted: &str) -> Option<&'static str> {
     }
 }
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "linux", test))]
 fn joined_words(text: &str) -> String {
     text.split_whitespace().collect()
 }
@@ -44,7 +45,7 @@ fn joined_words(text: &str) -> String {
 /// Match full words or their initials without a product-specific alias table.
 /// Require at least two abbreviated words, so a single short prefix is not
 /// treated as a guess. States are bounded by the requested name's length.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "linux", test))]
 fn abbreviated_name(wanted: &str, label: &str) -> bool {
     let mut states = std::collections::HashSet::from([(0usize, 0u8)]);
     for word in label.split_whitespace() {
@@ -63,7 +64,7 @@ fn abbreviated_name(wanted: &str, label: &str) -> bool {
     states.contains(&(wanted.len(), 2))
 }
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "linux", test))]
 fn score(wanted: &str, label: &str) -> Option<u8> {
     let label = normalize(label);
     if label == wanted { return Some(0); }
@@ -85,8 +86,13 @@ fn score(wanted: &str, label: &str) -> Option<u8> {
 
 /// Return the best distinct identities. Duplicate shortcuts for one app must
 /// not create ambiguity; different products/editions must not be guessed away.
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "linux", test))]
 pub(super) fn matches(wanted: &str, apps: &[AppName]) -> Vec<usize> {
+    matches_with_case(wanted, apps, true)
+}
+
+#[cfg(any(windows, target_os = "linux", test))]
+pub(super) fn matches_with_case(wanted: &str, apps: &[AppName], ignore_identity_case: bool) -> Vec<usize> {
     let wanted = normalize(wanted);
     if wanted.is_empty() { return Vec::new(); }
     let mut best = u8::MAX;
@@ -101,7 +107,8 @@ pub(super) fn matches(wanted: &str, apps: &[AppName]) -> Vec<usize> {
             found.clear();
             identities.clear();
         }
-        if identities.insert(app.identity.to_lowercase()) { found.push(index); }
+        let identity = if ignore_identity_case { app.identity.to_lowercase() } else { app.identity.clone() };
+        if identities.insert(identity) { found.push(index); }
     }
     found
 }
@@ -116,9 +123,14 @@ fn launch(wanted: &str, may_launch: impl Fn() -> bool) -> String {
     super::apps_windows::launch(wanted, may_launch)
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn launch(wanted: &str, may_launch: impl Fn() -> bool) -> String {
+    super::apps_linux::launch(wanted, may_launch)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn launch(_: &str, _: impl Fn() -> bool) -> String {
-    "Local app commands are currently available on Windows only.".into()
+    "Local app commands are not available on this platform.".into()
 }
 
 #[cfg(test)]
@@ -151,6 +163,14 @@ mod tests {
     fn genuinely_different_apps_remain_ambiguous() {
         let apps = [app("Discord", "first"), app("Discord", "second")];
         assert_eq!(matches("discord", &apps), vec![0, 1]);
+    }
+
+    #[test]
+    fn linux_desktop_identities_are_case_sensitive() {
+        let apps = [app("Editor", "Editor.desktop"), app("Editor", "editor.desktop")];
+        assert_eq!(matches_with_case("editor", &apps, false), vec![0, 1]);
+        let duplicates = [app("Editor", "editor.desktop"), app("Editor", "editor.desktop")];
+        assert_eq!(matches_with_case("editor", &duplicates, false), vec![0]);
     }
     #[test]
     fn partial_names_do_not_select_maintenance_tools() {

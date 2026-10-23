@@ -10,12 +10,12 @@ import type { HubContext } from "../shell";
 import { button, card, divider, keyKeycap, keycap, number, row, segmented, select, toggle } from "../ui";
 
 /** Download / progress / installed, for the voice model. Redraws itself. */
-export function modelsControl(ctx: HubContext, onReady?: () => void, kind: "parakeet" | "multilingual" = "parakeet"): HTMLElement {
+export function modelsControl(ctx: HubContext, onReady?: () => void, kind: "parakeet" | "multilingual" | "turkish" = "parakeet"): HTMLElement {
   const el = h("div", { style: "display:flex;align-items:center;gap:8px" });
   let confirming = false;
   const state = (models: ModelsStatus) => models[kind] ?? { state: "missing" as const };
-  const download = () => kind === "parakeet" ? FlowBridge.download() : FlowBridge.downloadMultilingual();
-  const remove = () => kind === "parakeet" ? FlowBridge.removeModels() : FlowBridge.removeMultilingual();
+  const download = () => kind === "parakeet" ? FlowBridge.download() : kind === "multilingual" ? FlowBridge.downloadMultilingual() : FlowBridge.downloadTurkish();
+  const remove = () => kind === "parakeet" ? FlowBridge.removeModels() : kind === "multilingual" ? FlowBridge.removeMultilingual() : FlowBridge.removeTurkish();
   const run = (action: () => Promise<unknown>) => { void action().catch((err: unknown) => { el.append(h("span", { class: "hub-note", text: String(err) })); }); };
   let lastState = state(ctx.status.models).state;
   const draw = (models: ModelsStatus) => {
@@ -122,13 +122,15 @@ export async function flowSettingsPage(page: HTMLElement, ctx: HubContext) {
   recognition.append(card(
     row(t("Microphone"), t("The one Coucou listens to for dictation and calls."), select(mics, prefs.mic, (mic) => void ctx.setPrefs((p) => (p.mic = mic)))),
     divider(),
-    row(t("Dictation model"), t("Only affects dictation. Calls and OK Coucou keep Parakeet."), select<"parakeet" | "multilingual">([["parakeet", "Parakeet (default)"], ["multilingual", "Omnilingual — Türkçe / Turkish"]], prefs.dictationModel ?? "parakeet", (model) => void ctx.setPrefs((p) => (p.dictationModel = model)))),
+    row(t("Dictation model"), t("Only affects dictation. Calls and OK Coucou keep Parakeet."), select<"parakeet" | "multilingual" | "turkish">([["parakeet", "Parakeet (default)"], ["multilingual", "Omnilingual (1600 languages)"], ["turkish", "Türkçe Zipformer (27 MB)"]], prefs.dictationModel ?? "parakeet", (model) => void ctx.setPrefs((p) => (p.dictationModel = model)))),
   ));
   recognition.append(card(
     row(t("Parakeet, on your computer"), t("The most accurate, offline, 25 languages. Downloaded once (about {0} MB).", { 0: number(status.models.downloadMb) }), modelsControl(ctx)),
     h("div", { class: "hub-note", text: t("Your voice never leaves this computer: Parakeet turns it into text here, and the recording is dropped as soon as it is pasted.") }),
     divider(),
     row(t("Omnilingual — Turkish dictation"), t("Optional offline model, about {0} MB. Supports Turkish; accuracy varies by language. Download separately, then select above.", { 0: status.models.multilingualDownloadMb ?? 366 }), modelsControl(ctx, undefined, "multilingual")),
+    divider(),
+    row(t("Türkçe Zipformer — streaming"), t("Lightweight Turkish-only streaming model, about {0} MB. Low latency, low RAM. CC-BY-NC-4.0 (local use only).", { 0: status.models.turkishDownloadMb ?? 27 }), modelsControl(ctx, undefined, "turkish")),
   ));
 
   // ── Notetaker ──

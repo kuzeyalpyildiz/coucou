@@ -30,6 +30,19 @@ Files are pinned to an immutable upstream revision and checked against SHA-256
 before installation. No model is downloaded until you press Download.
 Model: Meta Omnilingual ASR, Apache-2.0; ONNX export by csukuangfj.
 
+Downloaded models take disk space; only loaded recognizers consume model RAM.
+In the current source, optional-model dictation no longer preloads Parakeet
+unnecessarily. Its cached Parakeet recognizer is released when neither wake-word
+listening nor Notetaker recording needs it. Switching back to Parakeet for a
+dictation releases the optional model's cache. Active recognition calls retain
+their own references until they finish.
+
+The optional recognizer also has its own five-minute idle timer, checked about
+once a minute: ongoing Parakeet wake-word activity no longer keeps it resident.
+Using both features concurrently may still require both models. Diagnostics
+report each cache separately; these changes do not impose a fixed RAM ceiling
+and have not yet been validated in a new native build.
+
 **Mochi doesn't get a notch on a PC — so it lives at the top of your screen instead.**
 
 Approve Claude Code permissions, watch your session work, drop a file, chat with Claude, keep an eye on your services — without leaving what you're doing.
@@ -185,7 +198,7 @@ against its SHA-256, kept in Coucou's data folder under `Models`).
 | Hover the pill at the bottom of the screen | Dictate, record a call, open Coucou. Put the pill on the left or right edge in Flow → Settings |
 | Click **Record a call** | Your microphone and what the computer plays, transcribed live, then written person by person with a summary and to-dos by Claude (your key). The audio is deleted once the transcript is written |
 | Say **« OK Coucou »**, then ask | Claude (your key) answers in the pill and out loud: pills, Spotify, your services' numbers, your agents, web search, open an app, an email prepared in your mail app. Turn it on in Notch → OK Coucou |
-| Enable **Local app commands** in **OK Coucou** (Windows), then say **“OK Coucou, open Spotify”** | Parakeet recognizes the command locally. No AI key, AI credits or online transcription needed. Normal dictation stays unchanged. |
+| Enable **Local app commands** in **OK Coucou** (Windows or Linux), then say **“OK Coucou, open Spotify”** | Parakeet recognizes the command locally. No AI key, AI credits or online transcription needed. Normal dictation stays unchanged. |
 
 Local app commands are off by default and keep the microphone open only after
 you enable them. The installed Parakeet model is required; enabling the switch
@@ -211,6 +224,21 @@ listener (the separate AI assistant can still listen if its switch is on).
 For a fully local launcher, leave the separate Claude assistant switch off.
 When both are enabled, app commands stay local, while other requests can go
 to Claude as before.
+
+Linux source now uses **GIO's registered application catalog** for both local
+voice commands and the AI assistant's app-opening tool. It honors the desktop's
+XDG application-menu registrations (including Flatpak/Snap entries when exported
+to that menu), skips hidden/non-menu entries, and refuses ambiguous matches.
+It activates the selected registered app directly, without passing recognized
+text to a shell, executable path, URL, or `gtk-launch` argument. Launch errors
+are reported instead of claiming the app opened. Linux desktop IDs remain
+case-sensitive, and the command preference is rechecked before activation.
+
+On both systems, exact English requests such as **show my notes**, **show my
+agents**, **open dictation**, **next song**, **previous song**, and **toggle
+music** also run locally. Spotify controls require Spotify to be running with
+playback available. This Linux implementation is not yet native-build or
+microphone validated; it is not included in an already published release.
 
 Manual Windows checks before release (not yet device-verified): enable commands
 with dictation and AI voice off; launch a unique shortcut; try an unknown name

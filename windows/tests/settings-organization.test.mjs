@@ -18,6 +18,7 @@ test("model selection, both downloads and all persisted preferences remain reach
   }
   assert.match(source, /modelsControl\(ctx\)/);
   assert.match(source, /modelsControl\(ctx, undefined, "multilingual"\)/);
+  assert.match(source, /modelsControl\(ctx, undefined, "turkish"\)/);
 });
 
 test("deletion stays separate and erase-all keeps its confirmation", () => {

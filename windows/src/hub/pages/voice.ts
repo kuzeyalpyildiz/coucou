@@ -46,15 +46,16 @@ export async function voicePage(page: HTMLElement, ctx: HubContext) {
   page.append(ctx.hero("voice", "OK Coucou", t("Say « OK Coucou », then ask anything: add a pill, play music, the weather, an email to prepare.")));
 
   const ready = status.models.parakeet.state === "ready";
-  if (navigator.userAgent.includes("Windows")) {
-    page.append(card(
+  const windows = status.platform === "windows";
+  page.append(card(
       row(t("Local app commands"),
         t("Say OK Coucou, open Spotify. Uses the local voice model, not AI credits. Dictation is unchanged. The microphone stays open while enabled."),
         toggle(prefs.voiceCommands, (on) => void ctx.setPrefs((p) => (p.voiceCommands = on)).then(() => ctx.navigate("voice")))),
-      h("div", { class: "hub-note", text: t("Opens registered Windows apps, including system apps. Duplicate app identities are merged; genuinely different matches need a more specific name. Responses are text only. English commands: open, launch, or start.") }),
+      h("div", { class: "hub-note", text: windows
+        ? t("Opens registered Windows apps, including system apps. Duplicate app identities are merged; genuinely different matches need a more specific name. Responses are text only. English commands: open, launch, or start.")
+        : t("Opens apps registered in your Linux application menu. Ambiguous names need a more specific name. Also supports show my notes, show my agents, next song, previous song, and toggle music. Responses are text only.") }),
       ...(!ready && prefs.voiceCommands ? [h("div", { class: "hub-warn", text: t("Download the voice model so Coucou can hear you.") })] : []),
-    ));
-  }
+  ));
   page.append(label(t("Listening")));
   const main = card(
     row(t("Listen for « OK Coucou »"), t("The microphone stays open; only what follows « OK Coucou » goes further."),
@@ -73,6 +74,7 @@ export async function voicePage(page: HTMLElement, ctx: HubContext) {
   const outputs: [VoiceOutput, string][] = [["system", t("System voice")], ["elevenlabs", "ElevenLabs"], ["off", t("Text only")]];
   const answers = card(
     row(t("Coucou answers out loud"), null, segmented(outputs, prefs.voiceOutput, (v) => void ctx.setPrefs((p) => (p.voiceOutput = v)).then(() => ctx.navigate("voice")))),
+    h("div", { class: "hub-note", text: t("Voice answers use the Anthropic model selected in Chat. If it is unavailable, Coucou tries the fast voice model. Your provider's usage charges apply.") }),
   );
   if (prefs.voiceOutput === "elevenlabs") {
     answers.append(

@@ -2,7 +2,7 @@
 //! Dictation only: installing/selecting this never changes calls or wake words.
 
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::io::Write;
 use sherpa_onnx::{OfflineOmnilingualAsrCtcModelConfig, OfflineRecognizer, OfflineRecognizerConfig};
 use tauri::AppHandle;
@@ -34,6 +34,7 @@ struct State {
     fraction: f64,
     error: Option<String>,
     recognizer: Option<Arc<OfflineRecognizer>>,
+    last_used: Option<Instant>,
 }
 
 fn state() -> &'static Mutex<State> {
@@ -44,7 +45,26 @@ fn state() -> &'static Mutex<State> {
 pub fn download_mb() -> u64 { MODELS.total_size().div_ceil(1_000_000) }
 pub fn is_ready() -> bool { MODELS.is_present() }
 pub fn is_loaded() -> bool { state().lock().unwrap().recognizer.is_some() }
-pub fn unload() { state().lock().unwrap().recognizer = None; }
+pub fn unload() {
+    let mut s = state().lock().unwrap();
+    s.recognizer = None;
+    s.last_used = None;
+}
+
+fn idle_expired(last_used: Option<Instant>, now: Instant, busy: bool) -> bool {
+    !busy && last_used.is_some_and(|last| now.saturating_duration_since(last) >= super::IDLE_UNLOAD)
+}
+
+/// Wake-word activity uses Parakeet and must not pin this optional model in RAM.
+pub fn unload_if_idle(dictating: bool) -> bool {
+    let mut s = state().lock().unwrap();
+    if s.recognizer.is_none() || !idle_expired(s.last_used, Instant::now(), dictating) {
+        return false;
+    }
+    s.recognizer = None;
+    s.last_used = None;
+    true
+}
 
 pub fn status() -> ModelState {
     let s = state().lock().unwrap();
@@ -68,9 +88,10 @@ pub fn transcribe(samples: &[f32]) -> Option<Transcript> {
             config.model_config.num_threads = super::threads();
             s.recognizer = OfflineRecognizer::create(&config).map(Arc::new);
         }
-        s.recognizer.clone()?
+        let rec = s.recognizer.clone()?;
+        s.last_used = Some(Instant::now());
+        rec
     };
-    super::mark_used();
     super::transcribe_with(&rec, samples)
 }
 
@@ -149,6 +170,7 @@ pub fn flow_multilingual_remove(app: AppHandle) -> Result<(), String> {
         let mut s = state().lock().unwrap();
         if s.running { return Err("Wait for the model download to finish".into()); }
         s.recognizer = None;
+        s.last_used = None;
         if MODELS.dir().exists() {
             std::fs::remove_dir_all(MODELS.dir()).map_err(|e| e.to_string())?;
         }
@@ -156,4 +178,18 @@ pub fn flow_multilingual_remove(app: AppHandle) -> Result<(), String> {
     }
     super::emit_status(&app);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_model_has_an_independent_idle_deadline() {
+        let start = Instant::now();
+        assert!(!idle_expired(None, start, false));
+        assert!(!idle_expired(Some(start), start, false));
+        assert!(!idle_expired(Some(start), start + super::super::IDLE_UNLOAD, true));
+        assert!(idle_expired(Some(start), start + super::super::IDLE_UNLOAD, false));
+    }
 }

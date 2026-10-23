@@ -323,6 +323,7 @@ fn begin(app: &AppHandle, flow: &Arc<Flow>) -> Option<Listening> {
     let ready = match model {
         store::DictationModel::Parakeet => speech::is_ready(),
         store::DictationModel::Multilingual => speech::multilingual::is_ready(),
+        store::DictationModel::Turkish => speech::turkish::is_ready(),
     };
     if !ready {
         pill::announce(
@@ -353,7 +354,29 @@ fn begin(app: &AppHandle, flow: &Arc<Flow>) -> Option<Listening> {
             let app_front = os::foreground_app().filter(|(id, _)| !is_shell(id));
             // Load the model while the user speaks, so the first dictation is
             // ready without keeping it (and its ~650 MB) resident all session.
-            speech::preload();
+            match model {
+                store::DictationModel::Parakeet => {
+                    // The optional dictation models are not needed by wake words
+                    // or Notetaker. Active decodes retain their own Arc.
+                    speech::multilingual::unload();
+                    speech::turkish::unload();
+                    speech::preload();
+                }
+                store::DictationModel::Multilingual => {
+                    // Do not preload Parakeet for an unrelated dictation model.
+                    // Keep it only if a separate feature currently needs it.
+                    speech::turkish::unload();
+                    if !crate::voice::is_listening() && !crate::notes::is_recording(app) {
+                        speech::unload_parakeet();
+                    }
+                }
+                store::DictationModel::Turkish => {
+                    speech::multilingual::unload();
+                    if !crate::voice::is_listening() && !crate::notes::is_recording(app) {
+                        speech::unload_parakeet();
+                    }
+                }
+            }
             dictating().store(true, Ordering::Relaxed);
             pill::update(app, |s| s.phase = "listening".into());
             Some(Listening { capture, take, started: Instant::now(), app: app_front })
@@ -410,6 +433,7 @@ fn process(app: &AppHandle, flow: &Arc<Flow>, samples: &[f32], front: Option<&(S
     let transcript = match model {
         store::DictationModel::Parakeet => speech::transcribe(samples),
         store::DictationModel::Multilingual => speech::multilingual::transcribe(samples),
+        store::DictationModel::Turkish => speech::turkish::transcribe(samples),
     }.ok_or("the selected dictation model is not loaded")?;
     let raw = transcript.text.trim().to_string();
     if raw.is_empty() {

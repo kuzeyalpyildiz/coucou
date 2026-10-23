@@ -16,8 +16,12 @@
 pub mod brain;
 pub mod wake;
 pub mod commands;
+mod buffer;
+mod local;
 #[cfg(windows)]
 mod apps_windows;
+#[cfg(target_os = "linux")]
+mod apps_linux;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -66,7 +70,7 @@ pub fn requirements_met() -> bool {
 pub fn sync(app: &AppHandle) {
     let (assistant, commands) = crate::flow::get(app).map(|f| {
         let store = f.store.lock().unwrap();
-        (store.prefs.voice, store.prefs.voice_commands && cfg!(windows))
+        (store.prefs.voice, store.prefs.voice_commands)
     }).unwrap_or_default();
     let wanted = (assistant && requirements_met()) || (commands && speech::is_ready());
     let mut running = RUNNING.lock().unwrap();
@@ -124,16 +128,17 @@ fn run(app: AppHandle, stop: Arc<AtomicBool>) {
     let mic = crate::flow::get(&app).map(|f| f.store.lock().unwrap().prefs.mic.clone()).unwrap_or_default();
     // Bounded: an unbounded queue grows without limit when transcription lags
     // behind the microphone (slow model, busy CPU). Drop stale chunks instead.
-    let (tx, rx) = mpsc::sync_channel::<Vec<f32>>(4);
+    let (tx, rx) = mpsc::sync_channel::<()>(1);
+    // Bound by sample count (two seconds), not variable audio callback count.
+    let audio_buffer = Arc::new(Mutex::new(buffer::AudioBuffer::new(speech::SAMPLE_RATE as usize * 2)));
+    let captured = audio_buffer.clone();
     let mut dropped_chunks: u64 = 0;
     // Last drop count we logged, so the warning fires once per 20 dropped
     // chunks instead of on every received chunk once a multiple is reached.
     let mut dropped_logged: u64 = 0;
     let capture = audio::Capture::start(audio::Source::Mic(if mic.is_empty() { None } else { Some(mic) }), move |s| {
-        if tx.try_send(s.to_vec()).is_err() {
-            // Queue full: receiver is busy transcribing; this audio is stale.
-            // Dropping keeps memory bounded to ~4 chunks instead of growing.
-        }
+        captured.lock().unwrap().push(s);
+        let _ = tx.try_send(());
     });
     let mut capture = match capture {
         Ok(c) => c,
@@ -156,19 +161,19 @@ fn run(app: AppHandle, stop: Arc<AtomicBool>) {
             crate::log::line(crate::memory::profile_line());
         }
         let chunk = match rx.recv_timeout(Duration::from_millis(300)) {
-            Ok(c) => {
-                // If transcription fell behind, skip stale queued audio: only
-                // the freshest chunk matters for wake-word latency and memory.
-                let mut fresh = c;
-                while let Ok(newer) = rx.try_recv() {
+            Ok(()) => {
+                let (samples, interrupted) = audio_buffer.lock().unwrap().take();
+                if interrupted {
                     dropped_chunks += 1;
-                    fresh = newer;
+                    vad.reset();
+                    mode = Mode::Wake;
+                    vad.hangover = 25;
                 }
                 if dropped_chunks - dropped_logged >= 20 {
                     dropped_logged = dropped_chunks;
                     crate::log::line(format!("voice: dropped {dropped_chunks} stale audio chunks (transcription lag)"));
                 }
-                Some(fresh)
+                Some(samples)
             }
             Err(mpsc::RecvTimeoutError::Timeout) => None,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -197,7 +202,10 @@ fn run(app: AppHandle, stop: Arc<AtomicBool>) {
             if segment.len() < speech::SAMPLE_RATE as usize * 35 / 100 {
                 continue;
             }
+            let decode_started = Instant::now();
             let Some(heard) = speech::transcribe(&segment).map(|t| t.text.trim().to_string()) else { continue };
+            crate::log::line(format!("voice: recognition {} ms for {} ms audio", decode_started.elapsed().as_millis(), segment.len() * 1000 / speech::SAMPLE_RATE as usize));
+            let now = Instant::now();
             if heard.is_empty() {
                 continue;
             }
@@ -236,23 +244,27 @@ fn run(app: AppHandle, stop: Arc<AtomicBool>) {
             show(&app, Some(VoiceView { phase: "thinking".into(), heard: question.clone(), answer: String::new() }));
             let (assistant, commands) = crate::flow::get(&app).map(|f| {
                 let store = f.store.lock().unwrap();
-                (store.prefs.voice, store.prefs.voice_commands && cfg!(windows))
+                (store.prefs.voice, store.prefs.voice_commands)
             }).unwrap_or_default();
             if commands {
                 // This path never calls the AI brain or online speech output.
                 // Normal dictation has its own capture/process path, unchanged.
-                let result = commands::respond(&question, || {
+                let allowed = !stop.load(Ordering::Relaxed) && !pill::dictating(&app) && !crate::notes::is_recording(&app)
+                    && crate::flow::get(&app).is_some_and(|f| f.store.lock().unwrap().prefs.voice_commands);
+                let result = if allowed { local::respond(&app, &question) } else { None };
+                let result = result.or_else(|| commands::respond(&question, || {
                     !stop.load(Ordering::Relaxed) && !pill::dictating(&app) && !crate::notes::is_recording(&app)
                         && crate::flow::get(&app).is_some_and(|f| f.store.lock().unwrap().prefs.voice_commands)
-                });
+                }));
                 if result.is_some() || !assistant {
                     show(&app, Some(VoiceView {
                         phase: "speaking".into(), heard: question,
-                        answer: result.unwrap_or_else(|| "Say OK Coucou, open, then an installed app's name.".into()),
+                        answer: result.unwrap_or_else(|| "Try: open an app, show my notes, show my agents, next song, previous song, or toggle music. General questions need the AI assistant and a Claude key.".into()),
                     }));
                     hide_at = Some(Instant::now() + Duration::from_secs(8));
                     vad.reset();
                     while rx.try_recv().is_ok() {}
+                    audio_buffer.lock().unwrap().take();
                     continue;
                 }
             }
@@ -274,6 +286,7 @@ fn run(app: AppHandle, stop: Arc<AtomicBool>) {
             vad.reset();
             // Drop what the microphone heard of Coucou's own voice.
             while rx.try_recv().is_ok() {}
+            audio_buffer.lock().unwrap().take();
             if answer.trim_end().ends_with('?') {
                 mode = Mode::FollowUp { until: Instant::now() + Duration::from_secs(8) };
                 vad.hangover = 40;
@@ -499,8 +512,8 @@ fn music(app: &AppHandle, input: &Value) -> (String, bool) {
     }
 }
 
-/// Windows voice modes share the registered app resolver. Linux uses its
-/// existing .desktop lookup. Recognized words never become shell commands.
+/// Both voice modes use the platform's registered app resolver. Recognized
+/// words never become shell commands, paths, URLs, or desktop-entry IDs.
 fn open_app(name: &str) -> (String, bool) {
     let wanted = wake::normalize(name);
     if wanted.is_empty() {
@@ -513,45 +526,11 @@ fn open_app(name: &str) -> (String, bool) {
         (result, acted)
     }
     #[cfg(target_os = "linux")]
-    match find_app(&wanted) {
-        Some((label, launch)) => {
-            launch();
-            (format!("{label} opened"), true)
-        }
-        None => (format!("No app named {name} on this computer."), false),
+    {
+        let result = apps_linux::launch(&wanted, || true);
+        let acted = result.starts_with("Launch requested:");
+        (result, acted)
     }
-}
-
-#[cfg(target_os = "linux")]
-fn find_app(wanted: &str) -> Option<(String, Box<dyn FnOnce()>)> {
-    let mut dirs = vec![std::path::PathBuf::from("/usr/share/applications"), std::path::PathBuf::from("/var/lib/flatpak/exports/share/applications")];
-    dirs.push(crate::platform::home_dir().join(".local/share/applications"));
-    dirs.push(crate::platform::home_dir().join(".local/share/flatpak/exports/share/applications"));
-    let mut best: Option<(usize, String, String)> = None;
-    for dir in dirs {
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
-        for e in entries.flatten() {
-            let path = e.path();
-            if path.extension().is_none_or(|x| x != "desktop") {
-                continue;
-            }
-            let Ok(text) = std::fs::read_to_string(&path) else { continue };
-            if text.lines().any(|l| l.trim() == "NoDisplay=true") {
-                continue;
-            }
-            let Some(app_name) = text.lines().find_map(|l| l.strip_prefix("Name=")).map(str::trim) else { continue };
-            let n = wake::normalize(app_name);
-            let score = if n == wanted { 0 } else if n.starts_with(wanted) { 1 } else if n.contains(wanted) { 2 } else { continue };
-            let id = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
-            if best.as_ref().is_none_or(|(s, _, _)| score < *s) {
-                best = Some((score, app_name.to_string(), id));
-            }
-        }
-    }
-    let (_, label, id) = best?;
-    Some((label, Box::new(move || {
-        let _ = std::process::Command::new("gtk-launch").arg(&id).spawn();
-    })))
 }
 
 #[cfg(test)]

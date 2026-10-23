@@ -278,7 +278,7 @@ export const Bridge = {
   codexPlanUsage: () => call<unknown>("codex_plan_usage"),
   /** Working-set size, model residency and voice state for Diagnostics. */
   memoryProfile: () =>
-    call<{ workingSetMb: number; modelLoaded: boolean; voiceListening: boolean; audioQueueBound: number }>(
+    call<{ workingSetMb: number; modelLoaded: boolean; parakeetLoaded: boolean; multilingualLoaded: boolean; voiceListening: boolean; audioQueueBound: number }>(
       "memory_profile",
     ),
 

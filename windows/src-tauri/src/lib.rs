@@ -860,6 +860,8 @@ pub fn run() {
             flow::flow_models_remove,
             speech::multilingual::flow_multilingual_download,
             speech::multilingual::flow_multilingual_remove,
+            speech::turkish::flow_turkish_download,
+            speech::turkish::flow_turkish_remove,
             flow::pill_state,
             flow::pill_hot,
             flow::pill_hover,
@@ -927,7 +929,13 @@ pub fn run() {
                     std::thread::sleep(std::time::Duration::from_secs(60));
                     let busy = voice::is_listening() || flow::is_dictating() || notes::is_recording(&idle);
                     if speech::unload_if_idle(busy) {
-                        log::line("speech: model freed after 5 min idle");
+                        log::line("speech: Parakeet cache freed after 5 min idle");
+                    }
+                    if speech::multilingual::unload_if_idle(flow::is_dictating()) {
+                        log::line("speech: optional dictation model cache freed after 5 min idle");
+                    }
+                    if speech::turkish::unload_if_idle(flow::is_dictating()) {
+                        log::line("speech: Turkish dictation model cache freed after 5 min idle");
                     }
                 })
                 .ok();

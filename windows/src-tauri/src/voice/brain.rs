@@ -12,6 +12,14 @@ use tauri::{AppHandle, Manager};
 const FAST_MODEL: &str = "claude-haiku-4-5";
 const FORGET_AFTER: Duration = Duration::from_secs(90);
 
+// Honor the user's Anthropic selection instead of silently preferring Haiku.
+// Never retry the same model twice when it is already the fast fallback.
+fn model_order(selected: &str) -> (String, Option<&'static str>) {
+    let selected = selected.trim();
+    let primary = if selected.is_empty() { FAST_MODEL } else { selected };
+    (primary.to_owned(), (primary != FAST_MODEL).then_some(FAST_MODEL))
+}
+
 pub struct Brain {
     messages: Vec<Value>,
     last: Instant,
@@ -119,13 +127,15 @@ impl Brain {
             .unwrap_or_default();
         let mut acted = false;
         let mut spoken = String::new();
+        let (mut active_model, mut fallback) = model_order(&chat_model);
         for _ in 0..5 {
             let turn = tauri::async_runtime::block_on(async {
-                match crate::claude::voice_turn(FAST_MODEL, &system, &self.messages, &tools).await {
+                match crate::claude::voice_turn(&active_model, &system, &self.messages, &tools).await {
                     Ok(v) => Ok(v),
-                    Err(err) if !chat_model.is_empty() => {
-                        crate::log::line(format!("voice: {err}; the chat's model instead"));
-                        crate::claude::voice_turn(&chat_model, &system, &self.messages, &tools).await
+                    Err(_) if fallback.is_some() => {
+                        active_model = fallback.take().unwrap().to_owned();
+                        crate::log::line("voice: selected model unavailable; trying the fast fallback");
+                        crate::claude::voice_turn(&active_model, &system, &self.messages, &tools).await
                     }
                     Err(err) => Err(err),
                 }
@@ -210,6 +220,14 @@ pub fn spoken_text(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn selected_voice_model_precedes_a_distinct_fallback() {
+        assert_eq!(super::model_order(" chosen-model "), ("chosen-model".into(), Some(super::FAST_MODEL)));
+        assert_eq!(super::model_order(""), (super::FAST_MODEL.into(), None));
+        assert_eq!(super::model_order("   "), (super::FAST_MODEL.into(), None));
+        assert_eq!(super::model_order(super::FAST_MODEL), (super::FAST_MODEL.into(), None));
+    }
+
     use super::*;
 
     #[test]
