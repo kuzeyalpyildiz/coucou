@@ -10,7 +10,7 @@ on:
       - 'windows/**'
       - '.github/workflows/windows-ci.yml'
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'windows/**'
       - '.github/workflows/windows-ci.yml'
