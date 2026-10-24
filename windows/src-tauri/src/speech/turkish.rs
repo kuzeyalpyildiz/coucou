@@ -111,9 +111,13 @@ pub fn transcribe(samples: &[f32]) -> Option<Transcript> {
         rec
     };
 
-    // Feed all samples, signal end, decode until done.
+    // Streaming Zipformer needs right context to emit the final speech frames.
+    // input_finished alone does not provide that acoustic context: append silence
+    // before finishing so releasing the dictation key does not clip the last words.
     let mut stream = rec.create_stream();
     stream.accept_waveform(super::SAMPLE_RATE as i32, samples);
+    let tail_silence = vec![0.0_f32; super::SAMPLE_RATE as usize * 4 / 5];
+    stream.accept_waveform(super::SAMPLE_RATE as i32, &tail_silence);
     stream.input_finished();
     while rec.is_ready(&stream) {
         rec.decode(&stream);
