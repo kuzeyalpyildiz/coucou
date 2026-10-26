@@ -5,7 +5,7 @@
 // (again a day later at most if the card was left unanswered), or Settings →
 // General → Updates. "Check now" is a click, so it works either way. Once
 // allowed, Coucou looks at launch and every 6 hours: one unauthenticated
-// `GET /repos/kuzeyalpyildiz/coucou-custom/releases`, no cookies, nothing about the user.
+// `GET /repos/kuzeyalpyildiz/coucou/releases`, no cookies, nothing about the user.
 //
 // Windows: the installer this copy came from — the per-user setup.exe in
 // %LOCALAPPDATA%\Coucou, the per-machine .msi under Program Files — is
@@ -29,9 +29,9 @@ use tauri::{AppHandle, Emitter};
 use crate::i18n::t;
 use crate::island::WINDOW_LABEL;
 
-pub const RELEASES_URL: &str = "https://api.github.com/repos/kuzeyalpyildiz/coucou-custom/releases?per_page=30";
+pub const RELEASES_URL: &str = "https://api.github.com/repos/kuzeyalpyildiz/coucou/releases?per_page=30";
 /// Where "What's new" goes when no release is known.
-pub const RELEASES_PAGE: &str = "https://github.com/kuzeyalpyildiz/coucou-custom/releases";
+pub const RELEASES_PAGE: &str = "https://github.com/kuzeyalpyildiz/coucou/releases";
 
 /// This platform's release tags: `windows-vX.Y.Z` / `linux-vX.Y.Z`. Never the
 /// rolling `windows-latest` / `linux-latest`, nor the Mac's `v…` or Android's.

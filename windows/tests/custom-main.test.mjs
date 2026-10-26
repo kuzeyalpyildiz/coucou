@@ -4,8 +4,8 @@ import { readFileSync, existsSync } from "node:fs";
 
 test("Custom updater uses the fork for release discovery and fallback", () => {
   const source = readFileSync(new URL("../src-tauri/src/update.rs", import.meta.url), "utf8");
-  assert.match(source, /pub const RELEASES_URL: &str = "https:\/\/api.github.com\/repos\/kuzeyalpyildiz\/coucou-custom\/releases\?per_page=30"/);
-  assert.match(source, /pub const RELEASES_PAGE: &str = "https:\/\/github.com\/kuzeyalpyildiz\/coucou-custom\/releases"/);
+  assert.match(source, /pub const RELEASES_URL: &str = "https:\/\/api.github.com\/repos\/kuzeyalpyildiz\/coucou\/releases\?per_page=30"/);
+  assert.match(source, /pub const RELEASES_PAGE: &str = "https:\/\/github.com\/kuzeyalpyildiz\/coucou\/releases"/);
 });
 
 test("optional dictation controls are experimental with a saved-selection escape hatch", () => {
