@@ -11,6 +11,7 @@ import {
   recordPress, type Binding,
 } from "../core/shortcuts";
 import { DEFAULT_SETTINGS, type Settings } from "../core/state";
+import type { UpdateStatus } from "../core/update";
 import { SOUND_NAMES } from "../core/sound";
 import {
   MAX_DECLARED, PILL_CATEGORIES, availablePills, chooseMainPill, isComingSoon, mainPillChoices,
@@ -21,6 +22,9 @@ import { startHub, type PageId } from "../hub/shell";
 import { FLOW_PAGE_RENDERERS } from "../hub/pages";
 import { agentsSection } from "./agents";
 import { phoneSection } from "./phone";
+import { whatsappSection } from "./whatsapp";
+import { WHATSAPP_ID } from "../core/whatsapp";
+import { updateRows, updatesListener } from "./updates";
 import { colorDot } from "./colors";
 import { renderDiff, statusDot } from "./parts";
 import {
@@ -769,6 +773,17 @@ const INTEGRATIONS: IntegrationDef[] = [
   { id: "integration_github", name: "GitHub", color: "#F4505E",
     fields: [{ key: "github-token", label: N_("Token"), placeholder: "ghp_…", secret: true }],
     hint: N_("Classic token with the repo scope, or fine-grained with read access to Pull requests, Commit statuses and Actions.") },
+  { id: "integration_gitlab", name: "GitLab", color: "#FC6D26",
+    fields: [
+      { key: "gitlab-url", label: N_("Instance URL"), placeholder: "https://gitlab.com", secret: false },
+      { key: "gitlab-token", label: N_("Token"), placeholder: "glpat-…", secret: true },
+    ],
+    hint: N_("Personal access token with read_api and read_user scopes.") },
+  { id: "integration_gitea", name: "Gitea", color: "#609926",
+    fields: [
+      { key: "gitea-url", label: N_("Instance URL"), placeholder: "https://gitea.example.com", secret: false },
+      { key: "gitea-token", label: N_("Token"), placeholder: "…", secret: true },
+    ] },
   { id: "integration_vercel", name: "Vercel", color: "#7C5CFF",
     fields: [{ key: "vercel-token", label: N_("Token"), placeholder: "…", secret: true }] },
   { id: "integration_n8n", name: "n8n", color: "#F29B38",
@@ -879,6 +894,27 @@ function integrationsSection(present: Record<string, boolean>): HTMLElement {
   return h("section", {}, h("h2", {}, h("span", { text: t("Integrations") })), note, list);
 }
 
+/** WhatsApp (experimental), under the other integrations: its pill is turned on from its own switch. */
+function whatsappSections(): HTMLElement[] {
+  if (!availablePills().some((p) => p.id === WHATSAPP_ID)) return [];
+  return [whatsappSection({
+    toggle,
+    maxPills: MAX_ACTIVE,
+    pillActive: () => settings.activeIntegrations.includes(WHATSAPP_ID),
+    setPill: (on) => {
+      const has = settings.activeIntegrations.includes(WHATSAPP_ID);
+      if (on && !has && settings.activeIntegrations.length < MAX_ACTIVE) {
+        settings.activeIntegrations = [...settings.activeIntegrations, WHATSAPP_ID];
+      } else if (!on && has) {
+        settings.activeIntegrations = settings.activeIntegrations.filter((x) => x !== WHATSAPP_ID);
+      } else {
+        return;
+      }
+      declaredChanged();
+    },
+  })];
+}
+
 // ── General section ───────────────────────────────────────────────────────────
 
 function generalSection(): HTMLElement {
@@ -959,6 +995,11 @@ function generalSection(): HTMLElement {
     ),
     h("div", { class: "hint", text: t("Hovering the island opens it; it folds again shortly after the pointer leaves. Click inside to keep it open.") }),
     h("div", { class: "row" },
+      h("label", { text: t("Show clock in the island") }),
+      toggle(settings.showClock, (v) => { settings.showClock = v; void save(); }),
+    ),
+    h("div", { class: "hint", text: t("The date and the time in the middle of the island when it is compact.") }),
+    h("div", { class: "row" },
       h("label", { text: t("Auto-close") }),
       autoClose,
       h("span", { class: "hint", text: t("seconds after you leave the island") }),
@@ -972,6 +1013,7 @@ function generalSection(): HTMLElement {
       toggle(settings.autostart, (v) => { settings.autostart = v; void save(); }),
     ),
     ...recapRows(),
+    ...updateRows(toggle, version),
     languageRow(),
   );
 }
@@ -1297,6 +1339,7 @@ async function main() {
   });
 
   void onEvent<ShortcutsReport>("shortcuts-status", (fresh) => shortcutsListener?.report(fresh));
+  void onEvent<UpdateStatus>("update-status", (fresh) => updatesListener?.(fresh));
   void onEvent<Settings>("settings-changed", (s) => {
     const before = `${settings.chatProvider}|${settings.ollamaUrl}|${settings.lmstudioUrl}|${settings.customUrl}`;
     settings = { ...settings, ...s };
@@ -1322,7 +1365,7 @@ async function render() {
   const shortcutReport = await Bridge.shortcutsStatus();
 
   const keys = [
-    "stripe-api-key", "github-token", "vercel-token",
+    "stripe-api-key", "github-token", "gitlab-url", "gitlab-token", "gitea-url", "gitea-token", "vercel-token",
     "n8n-url", "n8n-api-key", "resend-api-key", "notion-api-key", "calcom-api-key",
   ];
   const present: Record<string, boolean> = {};
@@ -1359,7 +1402,7 @@ async function render() {
     pills: () => [activePillsSection(connected)],
     agents: () => [claudeSection(status), agentsSection(agents), planSection(status)],
     chat: () => [apiSection(hasKey), chatProvidersSection(chatKeys, keyChanged), localSection(customKey)],
-    integrations: () => [integrationsSection(present)],
+    integrations: () => [integrationsSection(present), ...whatsappSections()],
     phone: () => [phoneSection(settings.phoneLink ?? false, toggle, settings)],
     shortcuts: () => [shortcutsSection(shortcutReport)],
   };

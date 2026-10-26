@@ -729,6 +729,7 @@ dependencies = [
  "keyring",
  "libc",
  "mdns-sd",
+ "miniz_oxide 0.8.9",
  "qrcode",
  "rcgen",
  "reqwest 0.12.28",

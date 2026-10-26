@@ -9,6 +9,10 @@ import { FlowBridge, type Edge, type FlowKey, type ModelsStatus } from "../../co
 import type { HubContext } from "../shell";
 import { button, card, divider, keyKeycap, keycap, number, row, segmented, select, toggle } from "../ui";
 
+// Optional speech models remain available to experimental builds only. Keep
+// saved preferences and downloaded files intact for users returning from dev.
+const experimentalDictation = import.meta.env?.VITE_EXPERIMENTAL_DICTATION === "true";
+
 /** Download / progress / installed, for the voice model. Redraws itself. */
 export function modelsControl(ctx: HubContext, onReady?: () => void, kind: "parakeet" | "multilingual" = "parakeet"): HTMLElement {
   const el = h("div", { style: "display:flex;align-items:center;gap:8px" });
@@ -64,6 +68,8 @@ export function modelsControl(ctx: HubContext, onReady?: () => void, kind: "para
 export async function flowSettingsPage(page: HTMLElement, ctx: HubContext) {
   const status = await ctx.refresh();
   const prefs = status.prefs;
+  // Let existing experimental users switch back without rewriting preferences.
+  const showExperimentalDictation = experimentalDictation || prefs.dictationModel === "multilingual";
   page.append(ctx.hero("flowsettings", t("Settings"), null));
 
   // In-page navigation only: keep the sidebar and saved page routes unchanged.
@@ -121,14 +127,16 @@ export async function flowSettingsPage(page: HTMLElement, ctx: HubContext) {
   if (prefs.mic && !mics.some(([id]) => id === prefs.mic)) mics.push([prefs.mic, prefs.mic]);
   recognition.append(card(
     row(t("Microphone"), t("The one Coucou listens to for dictation and calls."), select(mics, prefs.mic, (mic) => void ctx.setPrefs((p) => (p.mic = mic)))),
-    divider(),
-    row(t("Dictation model"), t("Only affects dictation. Calls and OK Coucou keep Parakeet."), select<"parakeet" | "multilingual">([["parakeet", "Parakeet (default)"], ["multilingual", "Omnilingual — Türkçe / Turkish"]], prefs.dictationModel ?? "parakeet", (model) => void ctx.setPrefs((p) => (p.dictationModel = model)))),
+    ...(showExperimentalDictation ? [divider(),
+      row(t("Dictation model"), t("Only affects dictation. Calls and OK Coucou keep Parakeet."), select<"parakeet" | "multilingual">([["parakeet", "Parakeet (default)"], ["multilingual", "Omnilingual — Türkçe / Turkish"]], prefs.dictationModel ?? "parakeet", (model) => void ctx.setPrefs((p) => (p.dictationModel = model)))),
+    ] : []),
   ));
   recognition.append(card(
     row(t("Parakeet, on your computer"), t("The most accurate, offline, 25 languages. Downloaded once (about {0} MB).", { 0: number(status.models.downloadMb) }), modelsControl(ctx)),
     h("div", { class: "hub-note", text: t("Your voice never leaves this computer: Parakeet turns it into text here, and the recording is dropped as soon as it is pasted.") }),
-    divider(),
-    row(t("Omnilingual — Turkish dictation"), t("Optional offline model, about {0} MB. Supports Turkish; accuracy varies by language. Download separately, then select above.", { 0: status.models.multilingualDownloadMb ?? 366 }), modelsControl(ctx, undefined, "multilingual")),
+    ...(showExperimentalDictation ? [divider(),
+      row(t("Omnilingual — Turkish dictation"), t("Optional offline model, about {0} MB. Supports Turkish; accuracy varies by language. Download separately, then select above.", { 0: status.models.multilingualDownloadMb ?? 366 }), modelsControl(ctx, undefined, "multilingual")),
+    ] : []),
   ));
 
   // ── Notetaker ──

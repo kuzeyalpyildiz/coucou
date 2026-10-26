@@ -77,6 +77,10 @@ pub trait Features: Send + Sync {
     fn usage(&self) -> bool {
         false
     }
+    /// Last week's recap (counts only: minutes, sessions, files, lines, commands, permissions, the busiest agent).
+    fn recap(&self) -> bool {
+        false
+    }
     /// The relay is switched on (the phone then follows an access key rotation).
     fn relay(&self) -> bool {
         false
@@ -284,6 +288,7 @@ where
     let prefs = asked("prefs");
     let diffs = asked("diffs") && shared.features.diffs();
     let usage = asked("usage") && shared.features.usage();
+    let recap = asked("recap") && shared.features.recap();
     let relay = asked("relay") && shared.features.relay();
     let services: Vec<String> = if asked("services") { shared.features.services() } else { Vec::new() };
     let mut offered: Vec<&str> = Vec::new();
@@ -305,6 +310,9 @@ where
     if usage {
         offered.push("usage");
     }
+    if recap {
+        offered.push("recap");
+    }
     if relay {
         offered.push("relay");
     }
@@ -316,7 +324,7 @@ where
         welcome["caps"] = json!(offered);
     }
     let _ = say(welcome).await;
-    let (id, evicted) = shared.hub.subscribe_with(tx.clone(), (shared.clock)(), crate::phone_link::hub::Caps { details, answers, prefs, diffs, usage, relay, services });
+    let (id, evicted) = shared.hub.subscribe_with(tx.clone(), (shared.clock)(), crate::phone_link::hub::Caps { details, answers, prefs, diffs, usage, recap, relay, services });
     shared.features.request_snapshot();
 
     // 2. the conversation

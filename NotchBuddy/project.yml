@@ -131,14 +131,17 @@ targets:
         type: folder
       - path: Resources/Localizable.xcstrings
         buildPhase: resources
+      # What's new after an update, once in the notch (WhatsNewViews.swift; GitHub build)
+      - path: Resources/whats-new.json
+        buildPhase: resources
     info:
       path: Resources/Info.plist
       properties:
         CFBundleName: Coucou
         CFBundleDisplayName: Coucou
         CFBundleIdentifier: fr.louisraille.NotchBuddy
-        CFBundleVersion: "16"
-        CFBundleShortVersionString: "0.4.0"
+        CFBundleVersion: "20"
+        CFBundleShortVersionString: "0.5.3"
         CFBundlePackageType: APPL
         LSUIElement: YES
         NSHighResolutionCapable: YES
@@ -149,19 +152,24 @@ targets:
         NSSpeechRecognitionUsageDescription: "Coucou turns your voice into the text of a chat message."
         NSAccessibilityUsageDescription: "Pour lire le titre de la fenêtre active et l'attacher comme contexte."
         NSContactsUsageDescription: "Coucou looks up an email address when you ask it, by voice, to prepare an email."
+        NSFocusStatusUsageDescription: "Coucou stays quiet about new WhatsApp messages while a Focus is on."
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         CFBundleLocalizations:
           - en
           - ar
           - bn
+          - de
           - es
           - fr
           - hi
           - id
           - pt-BR
           - ru
+          - th
+          - tr
           - zh-Hans
+          - zh-Hant
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fr.louisraille.NotchBuddy
@@ -234,13 +242,17 @@ targets:
           - en
           - ar
           - bn
+          - de
           - es
           - fr
           - hi
           - id
           - pt-BR
           - ru
+          - th
+          - tr
           - zh-Hans
+          - zh-Hant
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fr.louisraille.Coucou

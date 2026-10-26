@@ -3,7 +3,7 @@ name: OpenCode Windows candidate build
 on:
   workflow_dispatch:
   push:
-    branches: [opencode-integration]
+    branches: [opencode-integration, main]
     paths:
       - 'windows/**'
       - '.github/workflows/opencode-windows.yml'

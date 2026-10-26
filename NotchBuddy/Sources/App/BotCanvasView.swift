@@ -28,6 +28,8 @@ struct BotCanvasView: View {
                 engine.lookX = look.x
                 engine.lookY = look.y
                 engine.particleOverhang = particleOverhang
+                // How the Mac feels (MochiMood.swift).
+                engine.moodTarget = MachineVitals.shared.mood
                 // Widen slot when file is hovering over the mailbox (morph > 0.5)
                 // Open mouth (hover=0.20R) when file dragged over box; close when not
                 if engine.morph > 0.3 {
@@ -49,6 +51,13 @@ struct BotCanvasView: View {
                         ? cgColorFromHex(state.focusTask!.color)
                         : nil
                 }
+                // A new Coucou waits and Mochi has nothing else to say: he turns blue, with an arrow.
+                let updateHint = MacUpdater.shared.hintActive
+                    && (state.effectiveState == .idle || state.effectiveState == .sleeping)
+                    && state.pendingApproval == nil && state.pendingQuestion == nil
+                    && !state.showingPlanDetail
+                if updateHint { engine.bodyColor = BotEngine.updateBlue }
+                engine.setUpdateHint(updateHint)
                 #else
                 engine.bodyColor = (state.focusTask?.isIntegration == true)
                     ? cgColorFromHex(state.focusTask!.color)

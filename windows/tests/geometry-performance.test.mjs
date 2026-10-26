@@ -20,7 +20,7 @@ test('settled geometry avoids style writes but still tracks viewport changes', (
     width: { value: 640 }, height: { value: 320 }, radius: { value: 22 },
     drawnGeometry: { w: NaN, h: NaN, r: NaN },
     pushedRect: { x: -1, y: -1, w: -1, h: -1 },
-    islandEl: node(), miniGrid: node(), greetingCanvas: node(), uploadCanvas: { el: node() },
+    islandEl: node(), miniGrid: node(), clockEl: node(), greetingCanvas: node(), uploadCanvas: { el: node() },
   };
   const frame = () => apply.call(island, bridge, viewport, 720, 640);
   frame();
@@ -35,7 +35,7 @@ test('settled geometry avoids style writes but still tracks viewport changes', (
   assert.deepEqual(calls.at(-1), [-20, 0, 640, 320]);
   island.height.value = 280;
   frame();
-  assert.equal(writes, 2, 'height updates only the panel height and mini-grid top');
+  assert.equal(writes, 3, 'height updates only the panel, mini-grid top and clock height');
   assert.equal(island.islandEl.style.height, '280px');
   assert.equal(calls.at(-1)[3], 280);
 });

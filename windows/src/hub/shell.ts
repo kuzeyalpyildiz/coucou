@@ -8,7 +8,7 @@ import { h, clear } from "../views/dom";
 import { t } from "../i18n/i18n";
 import { onEvent } from "../core/bridge";
 import { FlowBridge, dictationModelState, type FlowPrefs, type FlowStatus, type ModelsStatus } from "../core/flow";
-import { hero, liveMochi } from "./hero";
+import { hero, liveMochi, setWindowShown } from "./hero";
 import { icon, keyLabel } from "./ui";
 import { loadSaved } from "./load";
 
@@ -85,6 +85,11 @@ const DEFAULT_STATUS: FlowStatus = {
 
 export async function startHub(root: HTMLElement, opts: HubOptions) {
   document.body.classList.add("hub-window");
+  // The window is created hidden and only shown and hidden afterwards: its
+  // canvases animate only while it is on screen (#792).
+  await onEvent<boolean>("hub-visible", setWindowShown);
+  const shown = await FlowBridge.hubShown();
+  if (shown !== null) setWindowShown(shown);
   let current: PageId = "dictation";
   let status: FlowStatus = DEFAULT_STATUS;
   // Defaults are for browser preview only, never an installed app's saved data.
