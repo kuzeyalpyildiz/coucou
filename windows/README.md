@@ -11,7 +11,7 @@ Privacy, and App, with keyboard-accessible section shortcuts. Model downloads
 and history deletion are separated from everyday preferences; the sidebar is unchanged.
 
 Download the MSI or `coucou-latest.exe` from this fork's
-[Windows 0.5.5 release](https://github.com/kuzeyalpyildiz/coucou-custom/releases/tag/windows-v0.5.5).
+[Windows 0.5.5 release](https://github.com/kuzeyalpyildiz/coucou/releases/tag/windows-v0.5.5).
 The bootstrap installer checks the MSI checksum before installation.
 
 #### Optional Turkish dictation
@@ -60,9 +60,9 @@ Approve Claude Code permissions, watch your session work, drop a file, chat with
 
 ## Install
 
-Download **[coucou-latest.exe](https://github.com/kuzeyalpyildiz/coucou-custom/releases/latest/download/coucou-latest.exe)**
+Download **[coucou-latest.exe](https://github.com/kuzeyalpyildiz/coucou/releases/latest/download/coucou-latest.exe)**
 (verified latest-stable downloader), or choose the x64 MSI from
-**[this fork's latest release](https://github.com/kuzeyalpyildiz/coucou-custom/releases/latest)**,
+**[this fork's latest release](https://github.com/kuzeyalpyildiz/coucou/releases/latest)**,
 always the newest version, and run it. The .exe installs for the current user only, with no admin prompt; the .msi may ask for admin rights.
 
 **Windows will show a warning the first time — that's expected.** The installer isn't code-signed yet, so SmartScreen doesn't know the publisher:
