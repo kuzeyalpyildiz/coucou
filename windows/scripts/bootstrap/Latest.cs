@@ -11,7 +11,7 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 static class Latest {
-    const string Repo = "https://github.com/kuzeyalpyildiz/coucou-custom/releases/download/";
+    const string Repo = "https://github.com/kuzeyalpyildiz/coucou/releases/download/";
     static string Asset(Dictionary<string, object> asset) {
         string url = (string)asset["browser_download_url"];
         if (!url.StartsWith(Repo, StringComparison.Ordinal) || new Uri(url).Scheme != "https")
@@ -26,7 +26,7 @@ static class Latest {
             using (var client = new WebClient()) {
                 client.Headers["User-Agent"] = "Coucou-Latest-Installer";
                 var release = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(
-                    client.DownloadString("https://api.github.com/repos/kuzeyalpyildiz/coucou-custom/releases/latest"));
+                    client.DownloadString("https://api.github.com/repos/kuzeyalpyildiz/coucou/releases/latest"));
                 var installers = new List<Dictionary<string, object>>();
                 Dictionary<string, object> checksums = null;
                 foreach (Dictionary<string, object> asset in (IEnumerable)release["assets"]) {
